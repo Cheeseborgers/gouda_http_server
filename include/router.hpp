@@ -1,0 +1,56 @@
+//
+// Created by fason on 28/07/25.
+//
+
+#ifndef ROUTER_H
+#define ROUTER_H
+
+#include <regex>
+
+#include "http_structs.hpp"
+#include "types.hpp"
+
+class Router {
+public:
+    using RouteHandler = std::function<HttpResponse(const HttpRequest &, const HttpRequestParams &,
+                                                    const std::optional<json> &)>;
+
+    using Middleware = std::function<HttpResponse(const HttpRequest &, const std::optional<json> &,
+                                                  const std::function<HttpResponse()> &)>;
+    struct Route {
+        HttpMethod method;
+        RoutePattern pattern;
+        RouteHandler handler;
+        std::vector<std::string> param_names;
+    };
+
+    static void add_middleware(Middleware middleware) { s_middlewares.push_back(std::move(middleware)); }
+
+    static void add_route(const HttpMethod method, const std::string& path, RouteHandler handler) {
+        std::string regex_path = path;
+        std::vector<std::string> param_names;
+        const std::regex param_regex(R"(:([a-zA-Z_][a-zA-Z0-9_]*))");
+        std::sregex_iterator it(path.begin(), path.end(), param_regex);
+        const std::sregex_iterator end;
+
+        while (it != end) {
+            param_names.push_back((*it)[1].str());
+            ++it;
+        }
+
+        regex_path = std::regex_replace(regex_path, param_regex, R"(([^/]+))");
+        s_routes_by_method[method].emplace_back(Route{method, std::regex("^" + regex_path + "$"), std::move(handler), std::move(param_names)});
+    }
+
+    static HttpResponse route(const HttpRequest &request, const std::optional<json> &json_body = std::nullopt);
+
+    static void set_static_files_directory(std::string_view fs_path, std::string_view url_prefix = "/static/");
+
+private:
+    static std::filesystem::path s_static_files_directory;
+    static std::string s_static_url_prefix;
+    static std::unordered_map<HttpMethod, std::vector<Route>> s_routes_by_method;
+    static std::vector<Middleware> s_middlewares;
+};
+
+#endif // ROUTER_H
