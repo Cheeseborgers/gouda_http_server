@@ -2,7 +2,7 @@
 // Created by fason on 28/07/25.
 //
 
-#include "../include/http_request_parser.h"
+#include "http_request_parser.h"
 
 #include <cctype>
 #include <map>
@@ -12,8 +12,8 @@
 #include <string_view>
 #include <vector>
 
-#include "../include/http_structs.hpp"
-#include "../include/logger.hpp"
+#include "http_structs.hpp"
+#include "logger.hpp"
 #include "http_utils.hpp"
 
 std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, const bool debug, RequestId request_id)
