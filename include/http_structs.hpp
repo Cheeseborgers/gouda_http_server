@@ -61,6 +61,7 @@ struct HttpRequest {
     std::string raw; // full raw request
     std::optional<HttpRequestRange> range;
     std::map<std::string, std::vector<std::string>> query_params;
+    std::map<std::string, std::vector<std::string>> form_params;
 };
 
 //

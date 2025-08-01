@@ -48,7 +48,7 @@ enum class HttpStatusCode {
     HTTP_VERSION_NOT_SUPPORTED = 505
 };
 
-inline std::string status_text(const HttpStatusCode code) {
+inline std::string status_code_to_string(const HttpStatusCode code) {
     switch (code) {
         // 1xx – Informational
         case HttpStatusCode::CONTINUE: return "Continue";

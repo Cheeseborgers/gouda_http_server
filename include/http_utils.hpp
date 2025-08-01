@@ -9,7 +9,7 @@
 #include "logger.hpp"
 
 inline HttpResponse make_response(
-    HttpStatusCode code,
+    const HttpStatusCode code,
     std::string_view content_type,
     std::string_view body) {
     HttpResponse response(code, std::string(body), std::string(content_type));
@@ -17,7 +17,7 @@ inline HttpResponse make_response(
 }
 
 inline HttpResponse make_response(
-    HttpStatusCode code,
+    const HttpStatusCode code,
     std::string_view content_type,
     HttpStreamData stream_data) {
     HttpResponse response(code, std::move(stream_data), std::string(content_type));
@@ -75,7 +75,7 @@ inline std::string urldecode(std::string_view sv, RequestId request_id) {
     // Second pass to convert '+' to space after percent-decoding
     std::string final_result;
     final_result.reserve(result.size());
-    for (char c : result) {
+    for (const char c : result) {
         if (c == '+') {
             final_result += ' ';
             LOG_DEBUG(std::format("Request[{}]: Decoded '+' to space", request_id));
@@ -88,7 +88,7 @@ inline std::string urldecode(std::string_view sv, RequestId request_id) {
 }
 
 inline void parse_query_params(std::string_view query, std::map<std::string, std::vector<std::string>>& params,
-                                  RequestId request_id, bool debug) {
+                                  RequestId request_id, const bool debug) {
     if (query.empty()) {
         if (debug) {
             LOG_DEBUG(std::format("Request[{}]: No query parameters", request_id));
@@ -105,15 +105,17 @@ inline void parse_query_params(std::string_view query, std::map<std::string, std
             start = end + 1;
             continue;
         }
-        size_t eq_pos = pair.find('=');
-        std::string key, value;
-        if (eq_pos != std::string_view::npos) {
+
+        std::string key;
+        std::string value;
+        if (const size_t eq_pos = pair.find('='); eq_pos != std::string_view::npos) {
             key = urldecode(trim(pair.substr(0, eq_pos)), request_id);
             value = urldecode(trim(pair.substr(eq_pos + 1)), request_id);
         } else {
             key = urldecode(trim(pair), request_id);
             value = "";
         }
+
         if (key.empty()) {
             LOG_WARNING(std::format("Request[{}]: Empty query parameter key in '{}'", request_id, pair));
         } else {

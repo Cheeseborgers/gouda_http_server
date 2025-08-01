@@ -85,6 +85,22 @@ inline void setup_routes() {
        return make_response(OK, CONTENT_TYPE_JSON, response_body.dump());
    });
 
+    // Form data test route
+    Router::add_route(POST, "/form", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<json>&) {
+        if (request.form_params.empty()) {
+            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, json{{"error", "No form data or invalid Content-Type"}}.dump());
+        }
+        json response_body;
+        for (const auto& [key, values] : request.form_params) {
+            if (values.size() == 1) {
+                response_body[key] = values[0];
+            } else {
+                response_body[key] = values;
+            }
+        }
+        return make_response(OK, CONTENT_TYPE_JSON, response_body.dump());
+    });
+
     // Dynamic routes
     Router::add_route(GET, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<json>&) {
         json response_json = {

@@ -116,7 +116,7 @@ std::optional<std::string> ClientHandler::read_headers(std::string &buffer, Requ
     while ((pos = headers.find("Content-Length:", pos)) != std::string::npos) {
         count++;
         pos += sizeof("Content-Length:") - 1;
-        size_t value_start = headers.find_first_of("0123456789", pos);
+        const size_t value_start = headers.find_first_of("0123456789", pos);
         if (value_start != std::string::npos) {
             last_value_start = value_start;
         }
@@ -131,7 +131,7 @@ std::optional<std::string> ClientHandler::read_headers(std::string &buffer, Requ
     }
     try {
         std::string value = headers.substr(last_value_start);
-        size_t value_end = value.find_first_not_of("0123456789");
+        const size_t value_end = value.find_first_not_of("0123456789");
         if (value_end != std::string::npos) {
             value = value.substr(0, value_end);
         }
@@ -184,8 +184,12 @@ bool ClientHandler::read_body(std::string &buffer, size_t content_length, const 
 [[nodiscard]] std::optional<std::string> ClientHandler::read_requests(RequestId request_id) const {
     std::string buffer;
     buffer.reserve(REQUEST_BUFFER_SIZE);
+
     const auto headers = read_headers(buffer, request_id);
-    if (!headers) return std::nullopt;
+    if (!headers) {
+        return std::nullopt;
+    }
+
     const size_t header_end = headers->size();
     const auto content_length = get_content_length(*headers, request_id);
     if (!content_length) return std::nullopt;
@@ -250,14 +254,17 @@ void ClientHandler::send_raw(const HttpResponse &response, RequestId request_id)
                 sent_total += sent;
             }
             std::vector<char> buffer(m_config.stream_buffer_size);
-            uint64_t bytes_to_send = body.file_size; // Use file_size as per HttpStreamData
+            uint64_t bytes_to_send = body.file_size;
             uint64_t bytes_sent = 0;
             file.seekg(body.offset);
             while (bytes_sent < bytes_to_send) {
-                size_t chunk_size = std::min(m_config.stream_buffer_size, static_cast<size_t>(bytes_to_send - bytes_sent));
+                size_t chunk_size = std::min(m_config.stream_buffer_size, bytes_to_send - bytes_sent);
                 file.read(buffer.data(), chunk_size);
                 size_t bytes_read = file.gcount();
-                if (bytes_read == 0) break;
+                if (bytes_read == 0) {
+                    break;
+                }
+
                 size_t chunk_sent_total = 0;
                 while (chunk_sent_total < bytes_read) {
                     const ssize_t sent = m_sock.send(buffer.data() + chunk_sent_total, bytes_read - chunk_sent_total);

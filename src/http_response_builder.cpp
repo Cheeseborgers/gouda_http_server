@@ -11,7 +11,7 @@ std::string HttpResponseBuilder::build(const HttpResponse &response)
 {
     std::ostringstream oss;
     const int code = static_cast<int>(response.status_code);
-    const std::string reason = status_text(response.status_code);
+    const std::string reason = status_code_to_string(response.status_code);
 
     oss << std::format("HTTP/1.1 {} {}\r\n", code, reason);
     oss << std::format("Content-Type: {}\r\n", response.content_type);
@@ -51,7 +51,7 @@ std::string HttpResponseBuilder::build(const HttpResponse &response)
 std::string HttpResponseBuilder::build_headers_only(const HttpResponse& response) {
     std::ostringstream oss;
     const int code = static_cast<int>(response.status_code);
-    const std::string reason = status_text(response.status_code);
+    const std::string reason = status_code_to_string(response.status_code);
 
     oss << std::format("HTTP/1.1 {} {}\r\n", code, reason);
     oss << std::format("Content-Type: {}\r\n", response.content_type);
