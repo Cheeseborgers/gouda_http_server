@@ -8,12 +8,13 @@
 #include <regex>
 
 #include "http_structs.hpp"
+#include "http_utils.hpp"
 #include "types.hpp"
 
 class Router {
 public:
-    using RouteHandler = std::function<HttpResponse(const HttpRequest &, const HttpRequestParams &,
-                                                    const std::optional<json> &)>;
+    using RouteHandler =
+        std::function<HttpResponse(const HttpRequest &, const HttpRequestParams &, const std::optional<json> &)>;
 
     using Middleware = std::function<HttpResponse(const HttpRequest &, const std::optional<json> &,
                                                   const std::function<HttpResponse()> &)>;
@@ -26,7 +27,8 @@ public:
 
     static void add_middleware(Middleware middleware) { s_middlewares.push_back(std::move(middleware)); }
 
-    static void add_route(const HttpMethod method, const std::string& path, RouteHandler handler) {
+    static void add_route(const HttpMethod method, const std::string &path, RouteHandler handler)
+    {
         std::string regex_path = path;
         std::vector<std::string> param_names;
         const std::regex param_regex(R"(:([a-zA-Z_][a-zA-Z0-9_]*))");
@@ -39,12 +41,21 @@ public:
         }
 
         regex_path = std::regex_replace(regex_path, param_regex, R"(([^/]+))");
-        s_routes_by_method[method].emplace_back(Route{method, std::regex("^" + regex_path + "$"), std::move(handler), std::move(param_names)});
+        s_routes_by_method[method].emplace_back(
+            Route{method, std::regex("^" + regex_path + "$"), std::move(handler), std::move(param_names)});
     }
 
     static HttpResponse route(const HttpRequest &request, const std::optional<json> &json_body = std::nullopt);
 
     static void set_static_files_directory(std::string_view fs_path, std::string_view url_prefix = "/static/");
+
+private:
+    static const Route *match_route(const HttpRequest &request, std::smatch &matches);
+    static bool has_method_routes(HttpMethod method);
+    static bool client_prefers_html(const HttpRequest &request);
+    static bool is_valid_static_response(const HttpResponse &resp);
+
+    [[nodiscard]] static HttpResponse handle_static_file(const HttpRequest &request);
 
 private:
     static std::filesystem::path s_static_files_directory;

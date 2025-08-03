@@ -1,11 +1,12 @@
 #ifndef ROUTES_HPP
 #define ROUTES_HPP
 
-#include "http_status.hpp"
-#include "http_structs.hpp"
-#include "http_utils.hpp"
-#include "logger.hpp"
-#include "router.hpp"
+#include "include/http_status.hpp"
+#include "include/http_structs.hpp"
+#include "include/http_utils.hpp"
+#include "include/logger.hpp"
+#include "include/router.hpp"
+
 #include <nlohmann/json.hpp>
 
 inline void setup_routes() {
@@ -47,6 +48,19 @@ inline void setup_routes() {
     // Static routes
     Router::add_route(GET, "/", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
         return make_response(OK, CONTENT_TYPE_PLAIN, "Welcome to the home page!");
+    });
+    Router::add_route(GET, "/favicon.ico", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
+        std::filesystem::path favicon_path = "static/favicon.ico";
+        if (std::filesystem::exists(favicon_path)) {
+            uint64_t file_size = std::filesystem::file_size(favicon_path);
+            HttpStreamData stream_data{favicon_path, file_size, 0};
+            HttpResponse response(OK, stream_data, "image/x-icon");
+            response.set_header("Cache-Control", "max-age=3600");
+            LOG_DEBUG(std::format("Serving favicon: {} (size: {})", favicon_path.string(), file_size));
+            return response;
+        }
+        LOG_DEBUG("Favicon not found at static/favicon.ico");
+        return make_response(NOT_FOUND, CONTENT_TYPE_JSON, json{{"error", "Favicon not found"}}.dump());
     });
     Router::add_route(GET, "/about", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
         return make_response(OK, CONTENT_TYPE_PLAIN, "About page: This is a simple server.");

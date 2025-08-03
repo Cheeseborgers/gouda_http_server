@@ -14,6 +14,13 @@
 struct TaskBase {
     virtual ~TaskBase() = default;
     virtual void operator()() = 0;
+
+    // Prevent slicing/copying
+    TaskBase() = default;
+    TaskBase(const TaskBase&) = delete;
+    TaskBase& operator=(const TaskBase&) = delete;
+    TaskBase(TaskBase&&) = default;
+    TaskBase& operator=(TaskBase&&) = default;
 };
 
 template <typename F>

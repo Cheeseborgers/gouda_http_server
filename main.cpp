@@ -2,12 +2,12 @@
 #include <stdexcept>
 
 #include "routes.hpp"
-#include "include/http_server.h"
+#include "http_server.h"
 
-constexpr HostDetails DETAILS{"127.0.0.1", 8080};
+constexpr HostDetails DETAILS{LOCALHOST.data(), 8080};
 constexpr uint32_t BACKLOG{10};
 const size_t THREAD_POOL_SIZE = std::max(4u, 2 * std::thread::hardware_concurrency());
-constexpr int POLL_INTERVAL{100};
+constexpr int POLL_INTERVAL{DEFAULT_POLL_INTERVAL};
 
 int main() {
     try {

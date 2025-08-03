@@ -4,7 +4,6 @@
 
 #include "http_server.h"
 
-#include <iostream>
 #include <poll.h>
 #include <print>
 #include <utility>
@@ -56,47 +55,19 @@ void Server::setup_signal_handler()
 
 std::expected<void, std::string> Server::setup()
 {
+    // Unblock SIGINT and SIGTERM for graceful shutdown
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
     sigaddset(&set, SIGTERM);
     sigprocmask(SIG_UNBLOCK, &set, nullptr);
 
-    addrinfo hints{};
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-
-    addrinfo *servinfo{nullptr};
-    const std::string port_str = std::to_string(m_host_details.port);
-    if (const int rv = getaddrinfo(nullptr, port_str.c_str(), &hints, &servinfo); rv != 0) {
-        return std::unexpected(std::format("getaddrinfo: {}", gai_strerror(rv)));
+    auto sock_result = SocketFactory::make_server_socket(m_host_details.port, m_backlog);
+    if (!sock_result) {
+        return std::unexpected(sock_result.error());
     }
 
-    std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> servinfo_ptr(servinfo, freeaddrinfo);
-
-    for (const addrinfo *p = servinfo; p != nullptr; p = p->ai_next) {
-        m_sock = Socket(socket(p->ai_family, p->ai_socktype, p->ai_protocol), Socket::Type::Server);
-        if (!m_sock->is_valid()) {
-            continue; // try next address
-        }
-        if (!m_sock->set_reuse()) {
-            return std::unexpected(std::format("setsockopt: {}", std::strerror(errno)));
-        }
-        if (!m_sock->bind(p)) {
-            continue; // try next address
-        }
-        break;
-    }
-
-    if (!m_sock.has_value()) {
-        return std::unexpected("server: failed to bind");
-    }
-
-    if (!m_sock->listen(m_backlog)) {
-        return std::unexpected(std::format("listen: {}", std::strerror(errno)));
-    }
-
+    m_sock = std::move(*sock_result);
     return {}; // success
 }
 
@@ -115,7 +86,7 @@ void Server::accept_and_handle()
         return;
     }
     if (poll_result == 0 || !(pfd.revents & POLLIN)) {
-        return; // Timeout or no events
+        return;  // Timeout or nothing to read
     }
 
     sockaddr_storage their_addr{};

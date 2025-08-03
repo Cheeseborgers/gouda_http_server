@@ -69,34 +69,49 @@ struct HttpRequest {
 //
 struct HttpResponse {
     HttpStatusCode status_code{HttpStatusCode::OK};
-    std::string content_type{CONTENT_TYPE_PLAIN.data()};
+    std::string content_type{"text/plain; charset=utf-8"};  // Default content-type
     std::map<std::string, std::string, CaseInsensitiveCompare> headers;
     std::variant<std::string, HttpStreamData> body;
 
-    HttpResponse() = default;
-
-    explicit HttpResponse(const HttpStatusCode status_code, const std::string& body = {}, std::string_view content_type = {})
-        : status_code(status_code), body(body) {
-        if (!content_type.empty()) headers["Content-Type"] = content_type;
+    HttpResponse() {
+        // Set default headers on construction
+        set_default_headers();
     }
 
-    explicit HttpResponse(const HttpStatusCode status_code, HttpStreamData body, std::string_view content_type = {})
-        : status_code(status_code), body(std::move(body)) {
-        if (!content_type.empty()) headers["Content-Type"] = content_type;
+    explicit HttpResponse(HttpStatusCode status_code,
+                          const std::string &body = {},
+                          std::string_view content_type_ = "text/plain; charset=utf-8")
+        : status_code{status_code}, content_type{content_type_}, body{body}
+    {
+        set_default_headers();
+        set_header("Content-Type", content_type);
+    }
+
+    explicit HttpResponse(HttpStatusCode status_code,
+                          HttpStreamData body,
+                          std::string_view content_type_ = "application/octet-stream")
+        : status_code{status_code}, content_type{content_type_}, body{std::move(body)}
+    {
+        set_default_headers();
+        set_header("Content-Type", content_type);
     }
 
     void set_header(std::string_view key, std::string_view value) {
-        headers[key.data()] = value;
+        headers[std::string(key)] = std::string(value);
     }
-};
 
-//
-// HTTP error
-//
-struct HttpError {
-    HttpStatusCode status_code;
-    std::string status_text;
-    std::string body;
+private:
+    void set_default_headers() {
+        if (!headers.contains("X-Powered-By")) {
+            headers["X-Powered-By"] = POWERED_BY_TEXT;
+        }
+
+        if (!headers.contains("Server")) {
+            headers["Server"] = SERVER_NAME_VER;
+        }
+
+        // Content-Type is set in constructors explicitly
+    }
 };
 
 //
@@ -153,31 +168,6 @@ inline HttpMethod get_method(std::string_view method_str)
     return HttpMethod::UNKNOWN;
 }
 
-inline std::string escape_string(std::string_view input)
-{
-    std::string result;
-    for (const char c : input) {
-        if (c == '\r')
-            result += "\\r";
-        else if (c == '\n')
-            result += "\\n";
-        else if (std::isprint(static_cast<unsigned char>(c)))
-            result += c;
-        else
-            result += std::format("\\x{:02x}", static_cast<int>(static_cast<unsigned char>(c)));
-    }
-    return result;
-}
-
-inline std::string to_hex(std::string_view input)
-{
-    std::string result;
-    for (const char c : input) {
-        result += std::format("{:02x} ", static_cast<int>(static_cast<unsigned char>(c)));
-    }
-    return result;
-}
-
 inline std::string http_version_to_string(const HttpVersion version)
 {
     switch (version) {
@@ -205,18 +195,6 @@ inline HttpVersion string_to_http_version(std::string_view str)
                                                                      {"HTTP/3", HttpVersion::HTTP_3_0}};
     const auto it = map.find(str.data());
     return it != map.end() ? it->second : HttpVersion::HTTP_1_1; // Default to 1.1
-}
-
-// Case-insensitive string contains check
-inline bool contains_ignore_case(std::string_view str, std::string_view substr)
-{
-    if (substr.empty())
-        return true;
-    if (str.empty())
-        return false;
-    return std::ranges::search(str, substr, [](const char a, const char b) {
-               return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
-           }).begin() != str.end();
 }
 
 #endif // HTTP_STRUCTS_HPP

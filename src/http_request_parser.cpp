@@ -89,7 +89,7 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, co
             std::string value_str(value);
             if (std::regex_match(value_str, range_matches, range_regex)) {
                 try {
-                    HttpRequestRange range;
+                    HttpRequestRange range{};
                     range.start = std::stoull(range_matches[1].str());
                     range.end = range_matches[2].str().empty() ? 0 : std::stoull(range_matches[2].str());
                     req.range = range;
@@ -124,7 +124,7 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, co
         if (req.method == HttpMethod::POST) {
             auto content_type_iterator = req.headers.find("content-type");
             if (content_type_iterator != req.headers.end() &&
-                content_type_iterator->second.find("application/x-www-form-urlencoded") != std::string::npos) {
+                content_type_iterator->second.find(CONTENT_TYPE_FORM_URLENCODED) != std::string::npos) {
                 parse_query_params(body, req.form_params, request_id, debug);
                 if (debug) {
                     for (const auto &[key, values] : req.form_params) {
