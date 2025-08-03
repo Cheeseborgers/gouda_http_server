@@ -20,7 +20,9 @@ endif()
 find_package(nlohmann_json REQUIRED)
 
 add_executable(${PROJECT_NAME}
-        routes.hpp)
+        routes.hpp
+        include/file_cache.hpp
+        src/file_cache.cpp)
 
 target_sources(${PROJECT_NAME}
         PRIVATE

@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "file_cache.hpp"
+
 inline void setup_routes() {
     using enum HttpStatusCode;
     using enum HttpMethod;
@@ -49,18 +51,100 @@ inline void setup_routes() {
     Router::add_route(GET, "/", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
         return make_response(OK, CONTENT_TYPE_PLAIN, "Welcome to the home page!");
     });
-    Router::add_route(GET, "/favicon.ico", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
+    Router::add_route(GET, "/favicon.ico", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<json>&) {
+        const bool prefers_html = Router::client_prefers_html(request);
+        const std::string_view content_type = prefers_html ? "text/html; charset=utf-8" : CONTENT_TYPE_JSON.data();
         std::filesystem::path favicon_path = "static/favicon.ico";
-        if (std::filesystem::exists(favicon_path)) {
-            uint64_t file_size = std::filesystem::file_size(favicon_path);
-            HttpStreamData stream_data{favicon_path, file_size, 0};
-            HttpResponse response(OK, stream_data, "image/x-icon");
+        std::error_code ec;
+
+        if (!std::filesystem::exists(favicon_path) || std::filesystem::is_directory(favicon_path)) {
+            LOG_DEBUG(std::format("Favicon not found or is directory: {}", favicon_path.string()));
+            return HttpResponse(NOT_FOUND,
+                                prefers_html ? ERROR_404_HTML.data() : json{{"error", "Favicon not found"}}.dump(),
+                                content_type);
+        }
+
+        uint64_t file_size = std::filesystem::file_size(favicon_path, ec);
+        if (ec) {
+            LOG_ERROR(std::format("Failed to get file size for favicon: {} ({})", favicon_path.string(), ec.message()));
+            return HttpResponse(INTERNAL_SERVER_ERROR,
+                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read favicon"}}.dump(),
+                                content_type);
+        }
+
+        auto last_modified = std::filesystem::last_write_time(favicon_path, ec);
+        if (ec) {
+            LOG_ERROR(std::format("Failed to get last modified time for favicon: {} ({})", favicon_path.string(), ec.message()));
+            return HttpResponse(INTERNAL_SERVER_ERROR,
+                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read favicon metadata"}}.dump(),
+                                content_type);
+        }
+
+        FileCache::FileCacheEntry cache_entry;
+        if (FileCache::get(favicon_path.string(), cache_entry, last_modified)) {
+            HttpResponse response(OK, cache_entry.content, "image/x-icon");
             response.set_header("Cache-Control", "max-age=3600");
-            LOG_DEBUG(std::format("Serving favicon: {} (size: {})", favicon_path.string(), file_size));
+            response.set_header("Last-Modified", format_last_modified(last_modified));
+            response.set_header("Accept-Ranges", "bytes");
+            if (request.range) {
+                uint64_t start = request.range->start;
+                uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;
+                if (start >= file_size || start > end || end >= file_size) {
+                    LOG_DEBUG(std::format("Invalid range request for favicon: {}-{}, file_size: {}", start, end, file_size));
+                    HttpResponse resp(RANGE_NOT_SATISFIABLE,
+                                      prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                      content_type);
+                    resp.set_header("Content-Range", std::format("bytes */{}", file_size));
+                    return resp;
+                }
+                std::string range_content = cache_entry.content.substr(start, end - start + 1);
+                response = HttpResponse(PARTIAL_CONTENT, range_content, "image/x-icon");
+                response.set_header("Content-Range", std::format("bytes {}-{}/{}", start, end, file_size));
+                response.set_header("Accept-Ranges", "bytes");
+                response.set_header("Last-Modified", format_last_modified(last_modified));
+                LOG_DEBUG(std::format("Serving cached favicon (range): {} (range: {}-{})", favicon_path.string(), start, end));
+            } else {
+                LOG_DEBUG(std::format("Serving cached favicon: {} (size: {})", favicon_path.string(), cache_entry.content.size()));
+            }
             return response;
         }
-        LOG_DEBUG("Favicon not found at static/favicon.ico");
-        return make_response(NOT_FOUND, CONTENT_TYPE_JSON, json{{"error", "Favicon not found"}}.dump());
+
+        std::ifstream file(favicon_path, std::ios::binary);
+        if (!file) {
+            LOG_ERROR(std::format("Failed to open favicon: {}", favicon_path.string()));
+            return HttpResponse(INTERNAL_SERVER_ERROR,
+                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read favicon"}}.dump(),
+                                content_type);
+        }
+        std::string content((std::istreambuf_iterator<char>(file)), {});
+        file.close();
+        FileCache::put(favicon_path.string(), content, last_modified);
+
+        HttpResponse response(OK, content, "image/x-icon");
+        response.set_header("Cache-Control", "max-age=3600");
+        response.set_header("Last-Modified", format_last_modified(last_modified));
+        response.set_header("Accept-Ranges", "bytes");
+        if (request.range) {
+            uint64_t start = request.range->start;
+            uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;
+            if (start >= file_size || start > end || end >= file_size) {
+                LOG_DEBUG(std::format("Invalid range request for favicon: {}-{}, file_size: {}", start, end, file_size));
+                HttpResponse resp(RANGE_NOT_SATISFIABLE,
+                                  prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                  content_type);
+                resp.set_header("Content-Range", std::format("bytes */{}", file_size));
+                return resp;
+            }
+            std::string range_content = content.substr(start, end - start + 1);
+            response = HttpResponse(PARTIAL_CONTENT, range_content, "image/x-icon");
+            response.set_header("Content-Range", std::format("bytes {}-{}/{}", start, end, file_size));
+            response.set_header("Accept-Ranges", "bytes");
+            response.set_header("Last-Modified", format_last_modified(last_modified));
+            LOG_DEBUG(std::format("Serving favicon (range): {} (range: {}-{})", favicon_path.string(), start, end));
+        } else {
+            LOG_DEBUG(std::format("Serving favicon: {} (size: {})", favicon_path.string(), file_size));
+        }
+        return response;
     });
     Router::add_route(GET, "/about", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
         return make_response(OK, CONTENT_TYPE_PLAIN, "About page: This is a simple server.");

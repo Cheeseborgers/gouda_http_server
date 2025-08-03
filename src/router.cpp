@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <regex>
 
+#include "file_cache.hpp"
 #include "logger.hpp"
 
 std::filesystem::path Router::s_static_files_directory{"static"};
@@ -77,6 +78,13 @@ void Router::set_static_files_directory(std::string_view fs_path, std::string_vi
                          s_static_url_prefix));
 }
 
+bool Router::client_prefers_html(const HttpRequest &request)
+{
+    const auto it = request.headers.find("Accept");
+    return it != request.headers.end() && contains_ignore_case(it->second, "text/html");
+}
+
+
 // Private -------------------------
 const Router::Route *Router::match_route(const HttpRequest &request, std::smatch &matches)
 {
@@ -95,12 +103,6 @@ const Router::Route *Router::match_route(const HttpRequest &request, std::smatch
 }
 
 bool Router::has_method_routes(const HttpMethod method) { return s_routes_by_method.contains(method); }
-
-bool Router::client_prefers_html(const HttpRequest &request)
-{
-    const auto it = request.headers.find("Accept");
-    return it != request.headers.end() && contains_ignore_case(it->second, "text/html");
-}
 
 bool Router::is_valid_static_response(const HttpResponse &resp)
 {
@@ -176,47 +178,119 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
     auto it_mime = mime_types.find(ext);
     std::string content_type = it_mime != mime_types.end() ? it_mime->second : "application/octet-stream";
 
+    auto last_modified = std::filesystem::last_write_time(full_path, ec);
+    if (ec) {
+        LOG_ERROR(std::format("Failed to get last modified time for {}: {}", full_path.string(), ec.message()));
+        return HttpResponse(INTERNAL_SERVER_ERROR,
+                            prefers_html ? ERROR_500_HTML.data()
+                                         : json{{"error", "Failed to read file metadata"}}.dump(),
+                            error_content_type);
+    }
+
     constexpr uint64_t stream_threshold = DEFAULT_STREAM_THRESHOLD; // 1MB
     HttpResponse response;
 
-
-    if (request.range) {
-        uint64_t start = request.range->start;
-        uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;
-        if (start >= file_size || start > end || end >= file_size) {
-            LOG_DEBUG(std::format("Invalid range request for {}: {}-{}", full_path.string(), start, end));
-            return HttpResponse(RANGE_NOT_SATISFIABLE,
-                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Invalid range"}}.dump(),
-                                error_content_type);
+    FileCache::FileCacheEntry cache_entry;
+    if (file_size <= stream_threshold && FileCache::get(full_path.string(), cache_entry, last_modified)) {
+        if (request.range) {
+            uint64_t start = request.range->start;
+            uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;
+            if (start >= file_size || start > end || end >= file_size) {
+                LOG_DEBUG(std::format("Invalid range request for {}: {}-{}, file_size: {}", full_path.string(), start,
+                                      end, file_size));
+                HttpResponse resp(RANGE_NOT_SATISFIABLE,
+                                  prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                  error_content_type);
+                resp.set_header("Content-Range", std::format("bytes */{}", file_size));
+                return resp;
+            }
+            std::string content = cache_entry.content.substr(start, end - start + 1);
+            response = HttpResponse(PARTIAL_CONTENT, content, content_type);
+            response.set_header("Content-Range", std::format("bytes {}-{}/{}", start, end, file_size));
+            response.set_header("Accept-Ranges", "bytes");
+            response.set_header("Last-Modified", format_last_modified(last_modified));
+            LOG_DEBUG(std::format("Serving cached file (range): {} (type: {}, range: {}-{})", full_path.string(),
+                                  content_type, start, end));
         }
-        response = HttpResponse(PARTIAL_CONTENT, HttpStreamData{full_path, end - start + 1, start}, content_type);
-        response.set_header("Content-Range", std::format("bytes {}-{}/{}", start, end, file_size));
-        response.set_header("Accept-Ranges", "bytes");
-        LOG_DEBUG(std::format("Serving static file (range): {} (type: {}, range: {}-{})", full_path.string(),
-                              content_type, start, end));
-    }
-    else if (file_size <= stream_threshold) {
-        std::ifstream file(full_path, std::ios::binary);
-        if (!file) {
-            LOG_ERROR(std::format("Failed to open file: {}", full_path.string()));
-            return HttpResponse(INTERNAL_SERVER_ERROR,
-                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read file"}}.dump(),
-                                error_content_type);
+        else {
+            response = HttpResponse(OK, cache_entry.content, content_type);
+            response.set_header("Accept-Ranges", "bytes");
+            response.set_header("Last-Modified", format_last_modified(last_modified));
+            LOG_DEBUG(std::format("Serving cached file: {} (type: {}, size: {})", full_path.string(), content_type,
+                                  file_size));
         }
-        std::string content((std::istreambuf_iterator<char>(file)), {});
-        file.close();
-        response = HttpResponse(OK, content, content_type);
-        response.set_header("Accept-Ranges", "bytes");
-        LOG_DEBUG(std::format("Serving static file (string): {} (type: {}, size: {})", full_path.string(), content_type,
-                              file_size));
     }
     else {
-        response = HttpResponse(OK, HttpStreamData{full_path, file_size, 0}, content_type);
-        response.set_header("Accept-Ranges", "bytes");
-        LOG_DEBUG(std::format("Serving static file (stream): {} (type: {}, size: {})", full_path.string(), content_type,
-                              file_size));
+        if (file_size <= stream_threshold) {
+            std::ifstream file(full_path, std::ios::binary);
+            if (!file) {
+                LOG_ERROR(std::format("Failed to open file: {}", full_path.string()));
+                return HttpResponse(INTERNAL_SERVER_ERROR,
+                                    prefers_html ? ERROR_500_HTML.data()
+                                                 : json{{"error", "Failed to read file"}}.dump(),
+                                    error_content_type);
+            }
+            std::string content((std::istreambuf_iterator<char>(file)), {});
+            file.close();
+            FileCache::put(full_path.string(), content, last_modified);
+            if (request.range) {
+                uint64_t start = request.range->start;
+                uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;
+                if (start >= file_size || start > end || end >= file_size) {
+                    LOG_DEBUG(std::format("Invalid range request for {}: {}-{}, file_size: {}", full_path.string(),
+                                          start, end, file_size));
+                    HttpResponse resp(RANGE_NOT_SATISFIABLE,
+                                      prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                      error_content_type);
+                    resp.set_header("Content-Range", std::format("bytes */{}", file_size));
+                    return resp;
+                }
+                std::string range_content = content.substr(start, end - start + 1);
+                response = HttpResponse(PARTIAL_CONTENT, range_content, content_type);
+                response.set_header("Content-Range", std::format("bytes {}-{}/{}", start, end, file_size));
+                response.set_header("Accept-Ranges", "bytes");
+                response.set_header("Last-Modified", format_last_modified(last_modified));
+                LOG_DEBUG(std::format("Serving static file (range): {} (type: {}, range: {}-{})", full_path.string(),
+                                      content_type, start, end));
+            }
+            else {
+                response = HttpResponse(OK, content, content_type);
+                response.set_header("Accept-Ranges", "bytes");
+                response.set_header("Last-Modified", format_last_modified(last_modified));
+                LOG_DEBUG(std::format("Serving static file: {} (type: {}, size: {})", full_path.string(), content_type,
+                                      file_size));
+            }
+        }
+        else {
+            if (request.range) {
+                uint64_t start = request.range->start;
+                uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;
+                if (start >= file_size || start > end || end >= file_size) {
+                    LOG_DEBUG(std::format("Invalid range request for {}: {}-{}, file_size: {}", full_path.string(),
+                                          start, end, file_size));
+                    HttpResponse resp(RANGE_NOT_SATISFIABLE,
+                                      prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                      error_content_type);
+                    resp.set_header("Content-Range", std::format("bytes */{}", file_size));
+                    return resp;
+                }
+                response =
+                    HttpResponse(PARTIAL_CONTENT, HttpStreamData{full_path, end - start + 1, start}, content_type);
+                response.set_header("Content-Range", std::format("bytes {}-{}/{}", start, end, file_size));
+                response.set_header("Accept-Ranges", "bytes");
+                response.set_header("Last-Modified", format_last_modified(last_modified));
+                LOG_DEBUG(std::format("Serving static file (range, stream): {} (type: {}, range: {}-{})",
+                                      full_path.string(), content_type, start, end));
+            }
+            else {
+                response = HttpResponse(OK, HttpStreamData{full_path, file_size, 0}, content_type);
+                response.set_header("Accept-Ranges", "bytes");
+                response.set_header("Last-Modified", format_last_modified(last_modified));
+                LOG_DEBUG(std::format("Serving static file (stream): {} (type: {}, size: {})", full_path.string(),
+                                      content_type, file_size));
+            }
+        }
     }
-
 
     response.set_header("Cache-Control", "max-age=3600");
     return response;

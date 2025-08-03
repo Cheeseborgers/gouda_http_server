@@ -206,4 +206,20 @@ inline void inject_default_headers(HttpResponse &response) {
     }
 }
 
+inline std::string format_last_modified(const std::filesystem::file_time_type& time) {
+    try {
+        // Convert file_time_type to system_clock::time_point
+        const auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            time - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+        const auto tt = std::chrono::system_clock::to_time_t(sctp);
+        // Format as HTTP date (RFC 7231): "Day, DD Mon YYYY HH:MM:SS GMT"
+        std::stringstream ss;
+        ss << std::put_time(std::gmtime(&tt), "%a, %d %b %Y %H:%M:%S GMT");
+        return ss.str();
+    } catch (const std::exception& e) {
+        LOG_ERROR(std::format("Failed to format last modified time: {}", e.what()));
+        return "";
+    }
+}
+
 #endif // HTTP_UTILS_HPP

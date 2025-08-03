@@ -49,10 +49,11 @@ public:
 
     static void set_static_files_directory(std::string_view fs_path, std::string_view url_prefix = "/static/");
 
+    static bool client_prefers_html(const HttpRequest &request);
+
 private:
     static const Route *match_route(const HttpRequest &request, std::smatch &matches);
     static bool has_method_routes(HttpMethod method);
-    static bool client_prefers_html(const HttpRequest &request);
     static bool is_valid_static_response(const HttpResponse &resp);
 
     [[nodiscard]] static HttpResponse handle_static_file(const HttpRequest &request);

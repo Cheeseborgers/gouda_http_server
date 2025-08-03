@@ -2,7 +2,7 @@
 #include <stdexcept>
 
 #include "routes.hpp"
-#include "http_server.h"
+#include "http_server.hpp"
 
 constexpr HostDetails DETAILS{LOCALHOST.data(), 8080};
 constexpr uint32_t BACKLOG{10};
