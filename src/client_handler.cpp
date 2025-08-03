@@ -28,7 +28,8 @@ ClientHandler::ClientHandler(Socket sock, const ClientHandlerConfig &config)
         inet_ntop(AF_INET, &client_addr.sin_addr, ip_str, INET_ADDRSTRLEN);
         m_host_details.host = ip_str;
         m_host_details.port = client_addr.sin_port;
-    } else {
+    }
+    else {
         m_host_details.host = "unknown";
         m_host_details.port = 0;
         LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Failed to get client info: {}", m_sock.get(),
@@ -79,7 +80,7 @@ void ClientHandler::set_socket_timeouts() const
     return request.version == HttpVersion::HTTP_1_1;
 }
 
-std::optional<std::string> ClientHandler::read_headers(std::string &buffer, RequestId request_id) const
+[[nodiscard]] std::optional<std::string> ClientHandler::read_headers(std::string &buffer, RequestId request_id) const
 {
     char temp[REQUEST_HEADERS_BUFFER_SIZE];
     size_t header_end = std::string::npos;
@@ -89,12 +90,14 @@ std::optional<std::string> ClientHandler::read_headers(std::string &buffer, Requ
             if (bytes_received == 0) {
                 LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Connection closed by client",
                                      m_sock.get(), m_connection_id, request_id));
-            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                LOG_WARNING(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv timeout",
-                                        m_sock.get(), m_connection_id, request_id));
-            } else {
-                LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv error: {}",
-                                      m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
+            }
+            else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                LOG_WARNING(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv timeout", m_sock.get(),
+                                        m_connection_id, request_id));
+            }
+            else {
+                LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv error: {}", m_sock.get(),
+                                      m_connection_id, request_id, std::strerror(errno)));
             }
             return std::nullopt;
         }
@@ -103,8 +106,8 @@ std::optional<std::string> ClientHandler::read_headers(std::string &buffer, Requ
             const std::string_view chunk(temp, bytes_received);
             LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received chunk ({} bytes): [{}]",
                                   m_sock.get(), m_connection_id, request_id, bytes_received, escape_string(chunk)));
-            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Hex: {}",
-                                  m_sock.get(), m_connection_id, request_id, to_hex(chunk)));
+            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Hex: {}", m_sock.get(), m_connection_id,
+                                  request_id, to_hex(chunk)));
         }
         header_end = buffer.find("\r\n\r\n");
         if (header_end != std::string::npos) {
@@ -118,12 +121,13 @@ std::optional<std::string> ClientHandler::read_headers(std::string &buffer, Requ
             return buffer.substr(0, header_end);
         }
     }
-    LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Headers too large",
-                          m_sock.get(), m_connection_id, request_id));
+    LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Headers too large", m_sock.get(), m_connection_id,
+                          request_id));
     return std::nullopt;
 }
 
-std::optional<size_t> ClientHandler::get_content_length(const std::string &headers, RequestId request_id) const
+[[nodiscard]] std::optional<size_t> ClientHandler::get_content_length(const std::string &headers,
+                                                                      RequestId request_id) const
 {
     size_t count = 0;
     size_t pos = 0;
@@ -154,8 +158,8 @@ std::optional<size_t> ClientHandler::get_content_length(const std::string &heade
         value.erase(0, value.find_first_not_of(" \t"));
         value.erase(value.find_last_not_of(" \t\r\n") + 1);
         if (value.empty()) {
-            LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Empty Content-Length value",
-                                  m_sock.get(), m_connection_id, request_id));
+            LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Empty Content-Length value", m_sock.get(),
+                                  m_connection_id, request_id));
             return std::nullopt;
         }
         size_t length = std::stoul(value);
@@ -165,34 +169,37 @@ std::optional<size_t> ClientHandler::get_content_length(const std::string &heade
             return std::nullopt;
         }
         return length;
-    } catch (const std::exception &e) {
+    }
+    catch (const std::exception &e) {
         LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Invalid Content-Length value: {}",
                               m_sock.get(), m_connection_id, request_id, e.what()));
         return std::nullopt;
     }
 }
 
-bool ClientHandler::read_body(std::string &buffer, size_t content_length, const size_t header_end, RequestId request_id) const
+bool ClientHandler::read_body(std::string &buffer, size_t content_length, const size_t header_end,
+                              RequestId request_id) const
 {
     size_t current_body_size = buffer.size() - header_end;
     char temp[REQUEST_BODY_BUFFER_SIZE];
     while (current_body_size < content_length && buffer.size() < m_config.max_content_length + header_end) {
         const ssize_t bytes_received = m_sock.recv(temp, sizeof(temp));
         if (bytes_received <= 0) {
-            LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv error or disconnect during body read",
-                                  m_sock.get(), m_connection_id, request_id));
+            LOG_ERROR(
+                std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv error or disconnect during body read",
+                            m_sock.get(), m_connection_id, request_id));
             return false;
         }
         buffer.append(temp, bytes_received);
         current_body_size += bytes_received;
         if (m_config.debug) {
-            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Reading body... ({} / {})",
-                                  m_sock.get(), m_connection_id, request_id, current_body_size, content_length));
+            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Reading body... ({} / {})", m_sock.get(),
+                                  m_connection_id, request_id, current_body_size, content_length));
         }
     }
     if (current_body_size < content_length) {
-        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Body incomplete (expected {})",
-                              m_sock.get(), m_connection_id, request_id, content_length));
+        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Body incomplete (expected {})", m_sock.get(),
+                              m_connection_id, request_id, content_length));
         return false;
     }
     return true;
@@ -202,22 +209,26 @@ std::optional<std::string> ClientHandler::read_requests(RequestId request_id) co
 {
     std::string buffer;
     buffer.reserve(REQUEST_BUFFER_SIZE);
+
     const auto headers = read_headers(buffer, request_id);
     if (!headers) {
         return std::nullopt;
     }
+
     const size_t header_end = headers->size();
     const auto content_length = get_content_length(*headers, request_id);
     if (!content_length) {
         return std::nullopt;
     }
+
     if (*content_length > 0) {
         if (!read_body(buffer, *content_length, header_end, request_id)) {
             return std::nullopt;
         }
     }
-    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received ({} bytes)",
-                         m_sock.get(), m_connection_id, request_id, buffer.size()));
+
+    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received ({} bytes)", m_sock.get(),
+                         m_connection_id, request_id, buffer.size()));
     return buffer;
 }
 
@@ -231,8 +242,8 @@ void ClientHandler::send_raw(const HttpResponse &response, RequestId request_id)
                 while (sent_total < raw.size()) {
                     const ssize_t sent = m_sock.send(raw.data() + sent_total, raw.size() - sent_total);
                     if (sent == -1) {
-                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}",
-                                              m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
+                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}", m_sock.get(),
+                                              m_connection_id, request_id, std::strerror(errno)));
                         return;
                     }
                     sent_total += sent;
@@ -240,11 +251,13 @@ void ClientHandler::send_raw(const HttpResponse &response, RequestId request_id)
                 LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {})",
                                      m_sock.get(), m_connection_id, request_id, sent_total,
                                      static_cast<int>(response.status_code)));
-            } else if constexpr (std::is_same_v<std::decay_t<decltype(body)>, HttpStreamData>) {
+            }
+            else if constexpr (std::is_same_v<std::decay_t<decltype(body)>, HttpStreamData>) {
                 std::ifstream file(body.file_path, std::ios::binary);
                 if (!file) {
-                    LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to open file for streaming: {}",
-                                          m_sock.get(), m_connection_id, request_id, body.file_path.string()));
+                    LOG_ERROR(
+                        std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to open file for streaming: {}",
+                                    m_sock.get(), m_connection_id, request_id, body.file_path.string()));
                     HttpResponse error_response(HttpStatusCode::INTERNAL_SERVER_ERROR,
                                                 Json{{"error", "Failed to stream file"}}.dump(),
                                                 CONTENT_TYPE_JSON.data());
@@ -266,8 +279,8 @@ void ClientHandler::send_raw(const HttpResponse &response, RequestId request_id)
                 while (sent_total < headers.size()) {
                     const ssize_t sent = m_sock.send(headers.data() + sent_total, headers.size() - sent_total);
                     if (sent == -1) {
-                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}",
-                                              m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
+                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}", m_sock.get(),
+                                              m_connection_id, request_id, std::strerror(errno)));
                         file.close();
                         return;
                     }
@@ -297,11 +310,11 @@ void ClientHandler::send_raw(const HttpResponse &response, RequestId request_id)
                         chunk_sent_total += sent;
                     }
                     bytes_sent += chunk_sent_total;
-                    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Streamed {} bytes of {} (offset: {}, "
-                                          "file_size: {}, remaining: {})",
-                                          m_sock.get(), m_connection_id, request_id, chunk_sent_total,
-                                          body.file_path.string(), body.offset, body.file_size,
-                                          bytes_to_send - bytes_sent));
+                    LOG_DEBUG(
+                        std::format("Client[FD:{}][Connection:{}]: Request[{}]: Streamed {} bytes of {} (offset: {}, "
+                                    "file_size: {}, remaining: {})",
+                                    m_sock.get(), m_connection_id, request_id, chunk_sent_total,
+                                    body.file_path.string(), body.offset, body.file_size, bytes_to_send - bytes_sent));
                 }
                 file.close();
                 LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {}, streamed)",
@@ -313,7 +326,7 @@ void ClientHandler::send_raw(const HttpResponse &response, RequestId request_id)
 }
 
 void ClientHandler::send_error_response(const HttpStatusCode code, std::string_view body, std::string_view content_type,
-                                       const RequestId request_id) const
+                                        const RequestId request_id) const
 {
     HttpResponse error_response{code, body.data(), content_type.data()};
     error_response.set_header("Connection", "close");
@@ -336,8 +349,8 @@ void ClientHandler::send_error_response(const HttpStatusCode code, std::string_v
 
     size_t processed_bytes = 0;
     while (processed_bytes < raw_requests->size()) {
-        LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Starting new request",
-                             m_sock.get(), m_connection_id, request_id));
+        LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Starting new request", m_sock.get(),
+                             m_connection_id, request_id));
 
         std::string single_request;
         size_t request_end = raw_requests->find("\r\n\r\n", processed_bytes);
@@ -346,12 +359,14 @@ void ClientHandler::send_error_response(const HttpStatusCode code, std::string_v
             if (request_end != std::string::npos) {
                 request_end += 2;
                 single_request = raw_requests->substr(processed_bytes, request_end - processed_bytes) + "\r\n\r\n";
-            } else {
+            }
+            else {
                 LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Incomplete request in pipeline",
                                       m_sock.get(), m_connection_id, request_id));
                 return std::nullopt;
             }
-        } else {
+        }
+        else {
             request_end += 4;
             single_request = raw_requests->substr(processed_bytes, request_end - processed_bytes);
         }
@@ -383,9 +398,10 @@ void ClientHandler::send_error_response(const HttpStatusCode code, std::string_v
             if (single_request.find(CONTENT_TYPE_JSON_FULL) != std::string::npos) {
                 try {
                     json_body = Json::parse(body);
-                    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Parsed JSON body",
-                                         m_sock.get(), m_connection_id, request_id));
-                } catch (const Json::parse_error &e) {
+                    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Parsed JSON body", m_sock.get(),
+                                         m_connection_id, request_id));
+                }
+                catch (const Json::parse_error &e) {
                     LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: JSON parse error: {}",
                                           m_sock.get(), m_connection_id, request_id, e.what()));
                     send_error_response(HttpStatusCode::BAD_REQUEST, "Invalid JSON", CONTENT_TYPE_PLAIN, request_id);
@@ -393,7 +409,8 @@ void ClientHandler::send_error_response(const HttpStatusCode code, std::string_v
                 }
             }
             single_request += body;
-        } else {
+        }
+        else {
             processed_bytes = request_end;
         }
 
@@ -405,15 +422,17 @@ void ClientHandler::send_error_response(const HttpStatusCode code, std::string_v
 
         if (request->range) {
             LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Parsed Range header: bytes={}-{}",
-                                  m_sock.get(), m_connection_id, request_id, request->range->start, request->range->end));
-        } else {
-            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: No Range header",
-                                  m_sock.get(), m_connection_id, request_id));
+                                  m_sock.get(), m_connection_id, request_id, request->range->start,
+                                  request->range->end));
+        }
+        else {
+            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: No Range header", m_sock.get(),
+                                  m_connection_id, request_id));
         }
 
         if (request->version == HttpVersion::HTTP_1_1 && !request->headers.contains("host")) {
-            LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Missing Host header",
-                                  m_sock.get(), m_connection_id, request_id));
+            LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Missing Host header", m_sock.get(),
+                                  m_connection_id, request_id));
             send_error_response(HttpStatusCode::BAD_REQUEST, "Missing Host header", CONTENT_TYPE_PLAIN, request_id);
             return std::nullopt;
         }
@@ -424,8 +443,8 @@ void ClientHandler::send_error_response(const HttpStatusCode code, std::string_v
         send_raw(response, request_id);
 
         if (!keep_alive) {
-            LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Connection closed",
-                                 m_sock.get(), m_connection_id, request_id));
+            LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Connection closed", m_sock.get(),
+                                 m_connection_id, request_id));
             break;
         }
 

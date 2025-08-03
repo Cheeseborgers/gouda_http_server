@@ -36,9 +36,9 @@ public:
 private:
     void set_socket_timeouts() const;
     [[nodiscard]] bool should_keep_alive(const HttpRequest &request) const;
-    std::optional<std::string> read_headers(std::string &buffer, RequestId request_id) const;
+    [[nodiscard]] std::optional<std::string> read_headers(std::string &buffer, RequestId request_id) const;
     [[nodiscard]] std::optional<size_t> get_content_length(const std::string &headers, RequestId request_id) const;
-    bool read_body(std::string &buffer, size_t content_length, size_t header_end, RequestId request_id) const;
+    [[nodiscard]] bool read_body(std::string &buffer, size_t content_length, size_t header_end, RequestId request_id) const;
     [[nodiscard]] std::optional<std::string> read_requests(RequestId request_id) const;
     void send_raw(const HttpResponse &response, RequestId request_id) const;
     void send_error_response(HttpStatusCode code, std::string_view body, std::string_view content_type,
