@@ -13,7 +13,7 @@ std::string Router::s_static_url_prefix{"/assets/"};
 std::unordered_map<HttpMethod, std::vector<Router::Route>> Router::s_routes_by_method;
 std::vector<Router::Middleware> Router::s_middlewares;
 
-HttpResponse Router::route(const HttpRequest &request, const std::optional<json> &json_body)
+HttpResponse Router::route(const HttpRequest &request, const std::optional<Json> &json_body)
 {
     using enum HttpStatusCode;
     HttpRequestParams params;
@@ -32,11 +32,11 @@ HttpResponse Router::route(const HttpRequest &request, const std::optional<json>
         if (!matched_route) {
             if (!has_method_routes(request.method)) {
                 return HttpResponse(METHOD_NOT_ALLOWED,
-                                    prefers_html ? ERROR_500_HTML.data() : json{{"error", "Method not allowed"}}.dump(),
+                                    prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Method not allowed"}}.dump(),
                                     content_type);
             }
             return HttpResponse(NOT_FOUND,
-                                prefers_html ? ERROR_404_HTML.data() : json{{"error", "Page not found"}}.dump(),
+                                prefers_html ? ERROR_404_HTML.data() : Json{{"error", "Page not found"}}.dump(),
                                 content_type);
         }
 
@@ -136,7 +136,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
     std::string relative_path_str = request.path.substr(s_static_url_prefix.size());
     if (relative_path_str.find("..") != std::string::npos) {
         LOG_ERROR(std::format("Path traversal attempt detected in relative path: {}", relative_path_str));
-        return HttpResponse(FORBIDDEN, prefers_html ? ERROR_403_HTML.data() : json{{"error", "Access denied"}}.dump(),
+        return HttpResponse(FORBIDDEN, prefers_html ? ERROR_403_HTML.data() : Json{{"error", "Access denied"}}.dump(),
                             error_content_type);
     }
 
@@ -148,7 +148,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
     if (ec) {
         LOG_ERROR(std::format("Failed to resolve path {}: {}", full_path.string(), ec.message()));
         return HttpResponse(INTERNAL_SERVER_ERROR,
-                            prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to resolve file"}}.dump(),
+                            prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Failed to resolve file"}}.dump(),
                             error_content_type);
     }
 
@@ -156,13 +156,13 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
     if (ec || !canonical_path.string().starts_with(canonical_root.string())) {
         LOG_ERROR(
             std::format("Path traversal detected: {} not within {}", canonical_path.string(), canonical_root.string()));
-        return HttpResponse(FORBIDDEN, prefers_html ? ERROR_403_HTML.data() : json{{"error", "Access denied"}}.dump(),
+        return HttpResponse(FORBIDDEN, prefers_html ? ERROR_403_HTML.data() : Json{{"error", "Access denied"}}.dump(),
                             error_content_type);
     }
 
     if (!std::filesystem::exists(full_path) || std::filesystem::is_directory(full_path)) {
         LOG_DEBUG(std::format("Static file not found or is directory: {}", full_path.string()));
-        return HttpResponse(NOT_FOUND, prefers_html ? ERROR_404_HTML.data() : json{{"error", "File not found"}}.dump(),
+        return HttpResponse(NOT_FOUND, prefers_html ? ERROR_404_HTML.data() : Json{{"error", "File not found"}}.dump(),
                             error_content_type);
     }
 
@@ -170,7 +170,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
     if (ec) {
         LOG_ERROR(std::format("Failed to get file size for {}: {}", full_path.string(), ec.message()));
         return HttpResponse(INTERNAL_SERVER_ERROR,
-                            prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read file"}}.dump(),
+                            prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Failed to read file"}}.dump(),
                             error_content_type);
     }
 
@@ -183,7 +183,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
         LOG_ERROR(std::format("Failed to get last modified time for {}: {}", full_path.string(), ec.message()));
         return HttpResponse(INTERNAL_SERVER_ERROR,
                             prefers_html ? ERROR_500_HTML.data()
-                                         : json{{"error", "Failed to read file metadata"}}.dump(),
+                                         : Json{{"error", "Failed to read file metadata"}}.dump(),
                             error_content_type);
     }
 
@@ -199,7 +199,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
                 LOG_DEBUG(std::format("Invalid range request for {}: {}-{}, file_size: {}", full_path.string(), start,
                                       end, file_size));
                 HttpResponse resp(RANGE_NOT_SATISFIABLE,
-                                  prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                  prefers_html ? ERROR_416_HTML.data() : Json{{"error", "Invalid range"}}.dump(),
                                   error_content_type);
                 resp.set_header("Content-Range", std::format("bytes */{}", file_size));
                 return resp;
@@ -227,7 +227,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
                 LOG_ERROR(std::format("Failed to open file: {}", full_path.string()));
                 return HttpResponse(INTERNAL_SERVER_ERROR,
                                     prefers_html ? ERROR_500_HTML.data()
-                                                 : json{{"error", "Failed to read file"}}.dump(),
+                                                 : Json{{"error", "Failed to read file"}}.dump(),
                                     error_content_type);
             }
             std::string content((std::istreambuf_iterator<char>(file)), {});
@@ -240,7 +240,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
                     LOG_DEBUG(std::format("Invalid range request for {}: {}-{}, file_size: {}", full_path.string(),
                                           start, end, file_size));
                     HttpResponse resp(RANGE_NOT_SATISFIABLE,
-                                      prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                      prefers_html ? ERROR_416_HTML.data() : Json{{"error", "Invalid range"}}.dump(),
                                       error_content_type);
                     resp.set_header("Content-Range", std::format("bytes */{}", file_size));
                     return resp;
@@ -269,7 +269,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
                     LOG_DEBUG(std::format("Invalid range request for {}: {}-{}, file_size: {}", full_path.string(),
                                           start, end, file_size));
                     HttpResponse resp(RANGE_NOT_SATISFIABLE,
-                                      prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                      prefers_html ? ERROR_416_HTML.data() : Json{{"error", "Invalid range"}}.dump(),
                                       error_content_type);
                     resp.set_header("Content-Range", std::format("bytes */{}", file_size));
                     return resp;

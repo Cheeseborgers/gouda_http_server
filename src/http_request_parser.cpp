@@ -13,26 +13,26 @@
 #include <vector>
 
 #include "http_structs.hpp"
-#include "logger.hpp"
 #include "http_utils.hpp"
+#include "logger.hpp"
 
-std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, const bool debug, RequestId request_id)
+std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request_view, const bool debug, const RequestId request_id)
 {
     HttpRequest req;
 
-    const size_t first_line_end = request.find("\r\n");
+    const size_t first_line_end = request_view.find("\r\n");
     if (first_line_end == std::string_view::npos) {
         LOG_ERROR(std::format("Request[{}]: No \\r\\n found in request", request_id));
         return std::nullopt;
     }
 
-    const size_t headers_end = request.find("\r\n\r\n");
+    const size_t headers_end = request_view.find("\r\n\r\n");
     if (headers_end == std::string_view::npos) {
         LOG_ERROR(std::format("Request[{}]: No \\r\\n\\r\\n found in request", request_id));
         return std::nullopt;
     }
 
-    std::string_view first_line = request.substr(0, first_line_end);
+    std::string_view first_line = request_view.substr(0, first_line_end);
     const size_t method_end = first_line.find(' ');
     const size_t path_end = first_line.find(' ', method_end + 1);
 
@@ -44,8 +44,7 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, co
     req.method = get_method(first_line.substr(0, method_end));
     std::string_view full_path = first_line.substr(method_end + 1, path_end - method_end - 1);
     // Split path and query parameters
-    size_t query_start = full_path.find('?');
-    if (query_start != std::string_view::npos) {
+    if (size_t query_start = full_path.find('?'); query_start != std::string_view::npos) {
         req.path = std::string(full_path.substr(0, query_start));
         std::string_view query = full_path.substr(query_start + 1);
         parse_query_params(query, req.query_params, request_id, debug);
@@ -54,7 +53,7 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, co
         req.path = std::string(full_path);
     }
     req.version = string_to_http_version(first_line.substr(path_end + 1));
-    req.raw = std::string(request);
+    req.raw = std::string(request_view);
 
     if (debug) {
         LOG_DEBUG(std::format("Request[{}]: Parsed first line: {} {} {}", request_id, method_to_string(req.method),
@@ -66,8 +65,8 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, co
         }
     }
 
-    std::string_view headers_block = request.substr(first_line_end + 2, headers_end - first_line_end - 2);
-    for (const auto &line : split_lines(headers_block)) {
+    for (std::string_view headers_block = request_view.substr(first_line_end + 2, headers_end - first_line_end - 2);
+         const auto &line : split_lines(headers_block)) {
         if (line.empty()) {
             continue;
         }
@@ -85,9 +84,8 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, co
 
         if (key_lower == "range") {
             std::regex range_regex(R"(bytes=(\d+)-(\d*))");
-            std::smatch range_matches;
             std::string value_str(value);
-            if (std::regex_match(value_str, range_matches, range_regex)) {
+            if (std::smatch range_matches; std::regex_match(value_str, range_matches, range_regex)) {
                 try {
                     HttpRequestRange range{};
                     range.start = std::stoull(range_matches[1].str());
@@ -115,15 +113,15 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request, co
         }
     }
 
-    if (headers_end + 4 < request.size()) {
-        std::string_view body = request.substr(headers_end + 4);
+    if (headers_end + 4 < request_view.size()) {
+        std::string_view body = request_view.substr(headers_end + 4);
         req.body = std::string(body);
         if (debug) {
             LOG_DEBUG(std::format("Request[{}]: Parsed body ({} bytes)", request_id, body.size()));
         }
         if (req.method == HttpMethod::POST) {
-            auto content_type_iterator = req.headers.find("content-type");
-            if (content_type_iterator != req.headers.end() &&
+            if (auto content_type_iterator = req.headers.find("content-type");
+                content_type_iterator != req.headers.end() &&
                 content_type_iterator->second.find(CONTENT_TYPE_FORM_URLENCODED) != std::string::npos) {
                 parse_query_params(body, req.form_params, request_id, debug);
                 if (debug) {

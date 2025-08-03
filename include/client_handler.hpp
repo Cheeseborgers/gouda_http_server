@@ -1,5 +1,5 @@
-#ifndef CLIENT_HANDLER_H
-#define CLIENT_HANDLER_H
+#ifndef CLIENT_HANDLER_HPP
+#define CLIENT_HANDLER_HPP
 
 #include <chrono>
 #include <optional>
@@ -49,6 +49,7 @@ private:
     Socket m_sock;
     ClientHandlerConfig m_config;
     HostDetails m_host_details;
+    ConnectionId m_connection_id;
 };
 
-#endif // CLIENT_HANDLER_H
+#endif // CLIENT_HANDLER_HPP

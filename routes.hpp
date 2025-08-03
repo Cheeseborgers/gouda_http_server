@@ -1,14 +1,13 @@
 #ifndef ROUTES_HPP
 #define ROUTES_HPP
 
+#include <nlohmann/json.hpp>
+
 #include "include/http_status.hpp"
 #include "include/http_structs.hpp"
 #include "include/http_utils.hpp"
 #include "include/logger.hpp"
 #include "include/router.hpp"
-
-#include <nlohmann/json.hpp>
-
 #include "file_cache.hpp"
 
 inline void setup_routes() {
@@ -16,7 +15,7 @@ inline void setup_routes() {
     using enum HttpMethod;
 
     // Logging middleware
-    Router::add_middleware([](const HttpRequest& request, const std::optional<json>&, const std::function<HttpResponse()>& next) {
+    Router::add_middleware([](const HttpRequest& request, const std::optional<Json>&, const std::function<HttpResponse()>& next) {
         LOG_INFO(std::format("Request: {} {}", method_to_string(request.method), request.path));
         auto response = next();
         try {
@@ -31,27 +30,27 @@ inline void setup_routes() {
             }, response.body);
         } catch (const std::bad_variant_access& e) {
             LOG_ERROR(std::format("Middleware: std::variant access error: {}", e.what()));
-            return HttpResponse(INTERNAL_SERVER_ERROR, json{{"error", "Internal server error"}}.dump(), CONTENT_TYPE_JSON.data());
+            return HttpResponse(INTERNAL_SERVER_ERROR, Json{{"error", "Internal server error"}}.dump(), CONTENT_TYPE_JSON.data());
         }
         return response;
     });
 
     // Authentication middleware
-    Router::add_middleware([](const HttpRequest& request, const std::optional<json>&, const std::function<HttpResponse()>& next) {
+    Router::add_middleware([](const HttpRequest& request, const std::optional<Json>&, const std::function<HttpResponse()>& next) {
         if (request.path.starts_with("/user/")) {
             const auto it = request.headers.find("Authorization");
             if (it == request.headers.end() || it->second != "Bearer dummy_token") {
-                return make_response(UNAUTHORIZED, CONTENT_TYPE_JSON, json{{"error", "Unauthorized"}}.dump());
+                return make_response(UNAUTHORIZED, CONTENT_TYPE_JSON, Json{{"error", "Unauthorized"}}.dump());
             }
         }
         return next();
     });
 
     // Static routes
-    Router::add_route(GET, "/", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
+    Router::add_route(GET, "/", [](const HttpRequest&, const HttpRequestParams&, const std::optional<Json>&) {
         return make_response(OK, CONTENT_TYPE_PLAIN, "Welcome to the home page!");
     });
-    Router::add_route(GET, "/favicon.ico", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<json>&) {
+    Router::add_route(GET, "/favicon.ico", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<Json>&) {
         const bool prefers_html = Router::client_prefers_html(request);
         const std::string_view content_type = prefers_html ? "text/html; charset=utf-8" : CONTENT_TYPE_JSON.data();
         std::filesystem::path favicon_path = "static/favicon.ico";
@@ -60,7 +59,7 @@ inline void setup_routes() {
         if (!std::filesystem::exists(favicon_path) || std::filesystem::is_directory(favicon_path)) {
             LOG_DEBUG(std::format("Favicon not found or is directory: {}", favicon_path.string()));
             return HttpResponse(NOT_FOUND,
-                                prefers_html ? ERROR_404_HTML.data() : json{{"error", "Favicon not found"}}.dump(),
+                                prefers_html ? ERROR_404_HTML.data() : Json{{"error", "Favicon not found"}}.dump(),
                                 content_type);
         }
 
@@ -68,7 +67,7 @@ inline void setup_routes() {
         if (ec) {
             LOG_ERROR(std::format("Failed to get file size for favicon: {} ({})", favicon_path.string(), ec.message()));
             return HttpResponse(INTERNAL_SERVER_ERROR,
-                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read favicon"}}.dump(),
+                                prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Failed to read favicon"}}.dump(),
                                 content_type);
         }
 
@@ -76,7 +75,7 @@ inline void setup_routes() {
         if (ec) {
             LOG_ERROR(std::format("Failed to get last modified time for favicon: {} ({})", favicon_path.string(), ec.message()));
             return HttpResponse(INTERNAL_SERVER_ERROR,
-                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read favicon metadata"}}.dump(),
+                                prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Failed to read favicon metadata"}}.dump(),
                                 content_type);
         }
 
@@ -92,7 +91,7 @@ inline void setup_routes() {
                 if (start >= file_size || start > end || end >= file_size) {
                     LOG_DEBUG(std::format("Invalid range request for favicon: {}-{}, file_size: {}", start, end, file_size));
                     HttpResponse resp(RANGE_NOT_SATISFIABLE,
-                                      prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                      prefers_html ? ERROR_416_HTML.data() : Json{{"error", "Invalid range"}}.dump(),
                                       content_type);
                     resp.set_header("Content-Range", std::format("bytes */{}", file_size));
                     return resp;
@@ -113,7 +112,7 @@ inline void setup_routes() {
         if (!file) {
             LOG_ERROR(std::format("Failed to open favicon: {}", favicon_path.string()));
             return HttpResponse(INTERNAL_SERVER_ERROR,
-                                prefers_html ? ERROR_500_HTML.data() : json{{"error", "Failed to read favicon"}}.dump(),
+                                prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Failed to read favicon"}}.dump(),
                                 content_type);
         }
         std::string content((std::istreambuf_iterator<char>(file)), {});
@@ -130,7 +129,7 @@ inline void setup_routes() {
             if (start >= file_size || start > end || end >= file_size) {
                 LOG_DEBUG(std::format("Invalid range request for favicon: {}-{}, file_size: {}", start, end, file_size));
                 HttpResponse resp(RANGE_NOT_SATISFIABLE,
-                                  prefers_html ? ERROR_416_HTML.data() : json{{"error", "Invalid range"}}.dump(),
+                                  prefers_html ? ERROR_416_HTML.data() : Json{{"error", "Invalid range"}}.dump(),
                                   content_type);
                 resp.set_header("Content-Range", std::format("bytes */{}", file_size));
                 return resp;
@@ -146,33 +145,33 @@ inline void setup_routes() {
         }
         return response;
     });
-    Router::add_route(GET, "/about", [](const HttpRequest&, const HttpRequestParams&, const std::optional<json>&) {
+    Router::add_route(GET, "/about", [](const HttpRequest&, const HttpRequestParams&, const std::optional<Json>&) {
         return make_response(OK, CONTENT_TYPE_PLAIN, "About page: This is a simple server.");
     });
-    Router::add_route(POST, "/echo", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<json>&) {
+    Router::add_route(POST, "/echo", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<Json>&) {
         return make_response(OK, CONTENT_TYPE_PLAIN, request.body);
     });
-    Router::add_route(POST, "/json", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<json>& json_body) {
+    Router::add_route(POST, "/json", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<Json>& json_body) {
         if (!json_body) {
-            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, json{{"error", "Missing or invalid JSON body"}}.dump());
+            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, Json{{"error", "Missing or invalid JSON body"}}.dump());
         }
         try {
             std::string name = json_body->value("name", "Unknown");
-            json response_json = {
+            Json response_json = {
                 {"status", "received"},
                 {"name", name},
                 {"size", request.body.size()}
             };
             return make_response(OK, CONTENT_TYPE_JSON, response_json.dump());
-        } catch (const json::exception& e) {
+        } catch (const Json::exception& e) {
             LOG_ERROR(std::format("Router: JSON processing error: {}", e.what()));
-            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, json{{"error", "Invalid JSON structure"}}.dump());
+            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, Json{{"error", "Invalid JSON structure"}}.dump());
         }
     });
 
     // Query parameter test route
-    Router::add_route(GET, "/query", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<json>&) {
-       json response_body;
+    Router::add_route(GET, "/query", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<Json>&) {
+       Json response_body;
        for (const auto& [key, values] : request.query_params) {
            if (values.size() == 1) {
                response_body[key] = values[0]; // Single value as string
@@ -184,11 +183,11 @@ inline void setup_routes() {
    });
 
     // Form data test route
-    Router::add_route(POST, "/form", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<json>&) {
+    Router::add_route(POST, "/form", [](const HttpRequest& request, const HttpRequestParams&, const std::optional<Json>&) {
         if (request.form_params.empty()) {
-            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, json{{"error", "No form data or invalid Content-Type"}}.dump());
+            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, Json{{"error", "No form data or invalid Content-Type"}}.dump());
         }
-        json response_body;
+        Json response_body;
         for (const auto& [key, values] : request.form_params) {
             if (values.size() == 1) {
                 response_body[key] = values[0];
@@ -200,36 +199,36 @@ inline void setup_routes() {
     });
 
     // Dynamic routes
-    Router::add_route(GET, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<json>&) {
-        json response_json = {
+    Router::add_route(GET, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<Json>&) {
+        Json response_json = {
             {"id", params.at("id")},
             {"message", "User found"}
         };
         return make_response(OK, CONTENT_TYPE_JSON, response_json.dump());
     });
-    Router::add_route(PUT, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<json>& json_body) {
+    Router::add_route(PUT, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<Json>& json_body) {
         if (!json_body) {
-            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, json{{"error", "Missing JSON body"}}.dump());
+            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, Json{{"error", "Missing JSON body"}}.dump());
         }
-        json response_json = {
+        Json response_json = {
             {"id", params.at("id")},
             {"message", "User updated"},
             {"data", *json_body}
         };
         return make_response(OK, CONTENT_TYPE_JSON, response_json.dump());
     });
-    Router::add_route(DELETE, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<json>&) {
-        json response_json = {
+    Router::add_route(DELETE, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<Json>&) {
+        Json response_json = {
             {"id", params.at("id")},
             {"message", "User deleted"}
         };
         return make_response(OK, CONTENT_TYPE_JSON, response_json.dump());
     });
-    Router::add_route(PATCH, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<json>& json_body) {
+    Router::add_route(PATCH, "/user/:id", [](const HttpRequest&, const HttpRequestParams& params, const std::optional<Json>& json_body) {
         if (!json_body) {
-            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, json{{"error", "Missing JSON body"}}.dump());
+            return make_response(BAD_REQUEST, CONTENT_TYPE_JSON, Json{{"error", "Missing JSON body"}}.dump());
         }
-        json response_json = {
+        Json response_json = {
             {"id", params.at("id")},
             {"message", "User patched"},
             {"data", *json_body}

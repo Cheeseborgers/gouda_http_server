@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "client_handler.h"
+#include "client_handler.hpp"
 #include "socket_wrapper.h"
 #include "thread_pool.hpp"
 #include "logger.hpp"

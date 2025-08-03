@@ -28,7 +28,7 @@ class Socket {
 public:
     enum class Type : uint8_t { Client, Server };
 
-    explicit Socket(int fd, Type type) : m_fd{fd}, m_type{type} {
+    explicit Socket(const int fd, const Type type) : m_fd{fd}, m_type{type} {
         if (m_fd == -1) {
             throw std::runtime_error(std::strerror(errno));
         }
@@ -67,14 +67,14 @@ public:
         return m_type == Type::Client && ::connect(m_fd, p->ai_addr, p->ai_addrlen) != -1;
     }
 
-    [[nodiscard]] bool listen(int backlog = SOMAXCONN) const {
+    [[nodiscard]] bool listen(const int backlog = SOMAXCONN) const {
         return m_type == Type::Server && ::listen(m_fd, backlog) != -1;
     }
 
     void shutdown_read() const { ::shutdown(m_fd, SHUT_RD); }
     void shutdown_write() const { ::shutdown(m_fd, SHUT_WR); }
 
-    [[nodiscard]] ssize_t send(const char* data, size_t length) const {
+    [[nodiscard]] ssize_t send(const char* data, const size_t length) const {
         return ::send(m_fd, data, length, 0);
     }
 
@@ -82,20 +82,20 @@ public:
         return send(msg.c_str(), msg.size());
     }
 
-    [[nodiscard]] ssize_t send(std::string_view msg) const {
+    [[nodiscard]] ssize_t send(const std::string_view msg) const {
         return send(msg.data(), msg.size());
     }
 
-    [[nodiscard]] ssize_t recv(char* buffer, size_t length) const {
+    [[nodiscard]] ssize_t recv(char* buffer, const size_t length) const {
         return ::recv(m_fd, buffer, length, 0);
     }
 
-    [[nodiscard]] bool set_recv_timeout(std::chrono::seconds seconds) const {
+    [[nodiscard]] bool set_recv_timeout(const std::chrono::seconds seconds) const {
         const timeval tv{.tv_sec = seconds.count(), .tv_usec = 0};
         return ::setsockopt(m_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != -1;
     }
 
-    [[nodiscard]] bool set_send_timeout(std::chrono::seconds seconds) const {
+    [[nodiscard]] bool set_send_timeout(const std::chrono::seconds seconds) const {
         const timeval tv{.tv_sec = seconds.count(), .tv_usec = 0};
         return ::setsockopt(m_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != -1;
     }
@@ -105,7 +105,7 @@ public:
         return ::setsockopt(m_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) != -1;
     }
 
-    [[nodiscard]] bool set_non_blocking(bool enable) const {
+    [[nodiscard]] bool set_non_blocking(const bool enable) const {
         const int flags = fcntl(m_fd, F_GETFL, 0);
         if (flags == -1)
             return false;
@@ -166,20 +166,19 @@ struct AcceptedSocket {
 
 class SocketFactory {
 public:
-    static std::expected<Socket, std::string> make_server_socket(Port port, int backlog = SOMAXCONN) {
+    static std::expected<Socket, std::string> make_server_socket(const Port port, const int backlog = SOMAXCONN) {
         addrinfo hints{}, *res;
         hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_flags = AI_PASSIVE;
 
         const std::string port_str = std::to_string(port);
-        int gai_result = getaddrinfo(nullptr, port_str.c_str(), &hints, &res);
-        if (gai_result != 0) {
+        if (const int gai_result = getaddrinfo(nullptr, port_str.c_str(), &hints, &res); gai_result != 0) {
             return std::unexpected(std::format("getaddrinfo: {}", gai_strerror(gai_result)));
         }
 
         for (const addrinfo* p = res; p != nullptr; p = p->ai_next) {
-            int fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+            const int fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
             if (fd == -1) continue;
 
             Socket sock(fd, Socket::Type::Server);
@@ -200,23 +199,21 @@ public:
         return std::unexpected("server socket setup failed: no valid address found");
     }
 
-    static std::expected<Socket, std::string> make_client_socket(std::string_view host, Port port) {
+    static std::expected<Socket, std::string> make_client_socket(const std::string_view host, const Port port) {
         addrinfo hints{}, *res;
         hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;
 
         const std::string port_str = std::to_string(port);
-        int gai_result = getaddrinfo(host.data(), port_str.c_str(), &hints, &res);
-        if (gai_result != 0) {
+        if (const int gai_result = getaddrinfo(host.data(), port_str.c_str(), &hints, &res); gai_result != 0) {
             return std::unexpected(std::format("getaddrinfo: {}", gai_strerror(gai_result)));
         }
 
         for (const addrinfo* p = res; p != nullptr; p = p->ai_next) {
-            int fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+            const int fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
             if (fd == -1) continue;
 
-            Socket sock(fd, Socket::Type::Client);
-            if (sock.connect(p)) {
+            if (Socket sock(fd, Socket::Type::Client); sock.connect(p)) {
                 freeaddrinfo(res);
                 return sock;
             }
@@ -237,7 +234,7 @@ inline std::expected<AcceptedSocket, std::string> accept_socket(const Socket& se
     sockaddr_storage addr{};
     socklen_t addr_len = sizeof(addr);
 
-    int client_fd = ::accept(server_socket.get(), reinterpret_cast<sockaddr*>(&addr), &addr_len);
+    const int client_fd = ::accept(server_socket.get(), reinterpret_cast<sockaddr*>(&addr), &addr_len);
     if (client_fd == -1) {
         return std::unexpected(std::format("accept: {}", std::strerror(errno)));
     }

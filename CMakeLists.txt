@@ -22,7 +22,14 @@ find_package(nlohmann_json REQUIRED)
 add_executable(${PROJECT_NAME}
         routes.hpp
         include/file_cache.hpp
-        src/file_cache.cpp)
+        src/file_cache.cpp
+        include/sockets/base_socket.hpp
+        src/sockets/base_socket.cpp
+        "include/sockets/client_socket.hpp"
+        include/sockets/server_socket.hpp
+        src/sockets/client_socket.cpp
+        src/sockets/server_socket.cpp
+        include/sockets/accepted_socket.hpp)
 
 target_sources(${PROJECT_NAME}
         PRIVATE

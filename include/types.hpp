@@ -8,7 +8,7 @@
 #include <regex>
 
 #include <nlohmann/json.hpp>
-using json = nlohmann::json;
+using Json = nlohmann::json;
 
 using u8 = uint8_t;
 using u16 = uint16_t;
@@ -18,5 +18,6 @@ using u64 = uint64_t;
 using RoutePattern = std::regex;
 
 using RequestId = uint64_t;
+using ConnectionId = uint64_t;
 
 #endif //TYPES_HPP
