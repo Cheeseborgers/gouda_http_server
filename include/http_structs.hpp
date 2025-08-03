@@ -78,25 +78,25 @@ struct HttpResponse {
         set_default_headers();
     }
 
-    explicit HttpResponse(HttpStatusCode status_code,
+    explicit HttpResponse(const HttpStatusCode status_code,
                           const std::string &body = {},
-                          std::string_view content_type_ = "text/plain; charset=utf-8")
+                          const std::string_view content_type_ = "text/plain; charset=utf-8")
         : status_code{status_code}, content_type{content_type_}, body{body}
     {
         set_default_headers();
         set_header("Content-Type", content_type);
     }
 
-    explicit HttpResponse(HttpStatusCode status_code,
+    explicit HttpResponse(const HttpStatusCode status_code,
                           HttpStreamData body,
-                          std::string_view content_type_ = "application/octet-stream")
+                          const std::string_view content_type_ = "application/octet-stream")
         : status_code{status_code}, content_type{content_type_}, body{std::move(body)}
     {
         set_default_headers();
         set_header("Content-Type", content_type);
     }
 
-    void set_header(std::string_view key, std::string_view value) {
+    void set_header(const std::string_view key, const std::string_view value) {
         headers[std::string(key)] = std::string(value);
     }
 
@@ -118,7 +118,7 @@ private:
 // Helpers
 //
 // Convert Method enum to string
-inline std::string method_to_string(const HttpMethod method)
+inline std::string_view method_to_string_view(const HttpMethod method)
 {
     switch (method) {
         case HttpMethod::GET:
@@ -145,7 +145,7 @@ inline std::string method_to_string(const HttpMethod method)
 }
 
 // Parse method string to Method enum
-inline HttpMethod get_method(std::string_view method_str)
+inline HttpMethod get_method(const std::string_view method_str)
 {
     if (method_str == "GET")
         return HttpMethod::GET;
@@ -168,7 +168,7 @@ inline HttpMethod get_method(std::string_view method_str)
     return HttpMethod::UNKNOWN;
 }
 
-inline std::string http_version_to_string(const HttpVersion version)
+inline std::string_view http_version_to_string_view(const HttpVersion version)
 {
     switch (version) {
         case HttpVersion::HTTP_0_9:
@@ -186,7 +186,7 @@ inline std::string http_version_to_string(const HttpVersion version)
     }
 }
 
-inline HttpVersion string_to_http_version(std::string_view str)
+inline HttpVersion string_to_http_version(const std::string_view str)
 {
     static const std::unordered_map<std::string, HttpVersion> map = {{"HTTP/0.9", HttpVersion::HTTP_0_9},
                                                                      {"HTTP/1.0", HttpVersion::HTTP_1_0},

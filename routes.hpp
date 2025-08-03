@@ -16,7 +16,7 @@ inline void setup_routes() {
 
     // Logging middleware
     Router::add_middleware([](const HttpRequest& request, const std::optional<Json>&, const std::function<HttpResponse()>& next) {
-        LOG_INFO(std::format("Request: {} {}", method_to_string(request.method), request.path));
+        LOG_INFO(std::format("Request: {} {}", method_to_string_view(request.method), request.path));
         auto response = next();
         try {
             std::visit([&](const auto& body) {

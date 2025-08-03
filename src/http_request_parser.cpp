@@ -56,8 +56,8 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request_vie
     req.raw = std::string(request_view);
 
     if (debug) {
-        LOG_DEBUG(std::format("Request[{}]: Parsed first line: {} {} {}", request_id, method_to_string(req.method),
-                              req.path, http_version_to_string(req.version)));
+        LOG_DEBUG(std::format("Request[{}]: Parsed first line: {} {} {}", request_id, method_to_string_view(req.method),
+                              req.path, http_version_to_string_view(req.version)));
         for (const auto &[key, values] : req.query_params) {
             for (const auto &value : values) {
                 LOG_DEBUG(std::format("Request[{}]: Parsed query param: {}={}", request_id, key, value));
@@ -135,6 +135,6 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request_vie
         }
     }
 
-    LOG_INFO(std::format("Request[{}]: {} {}", request_id, method_to_string(req.method), req.path));
+    LOG_INFO(std::format("Request[{}]: {} {}", request_id, method_to_string_view(req.method), req.path));
     return req;
 }

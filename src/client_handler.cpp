@@ -80,7 +80,7 @@ void ClientHandler::set_socket_timeouts() const
     return request.version == HttpVersion::HTTP_1_1;
 }
 
-[[nodiscard]] std::optional<std::string> ClientHandler::read_headers(std::string &buffer, RequestId request_id) const
+[[nodiscard]] std::optional<std::string> ClientHandler::read_headers(std::string &buffer, const RequestId request_id) const
 {
     char temp[REQUEST_HEADERS_BUFFER_SIZE];
     size_t header_end = std::string::npos;
@@ -101,6 +101,7 @@ void ClientHandler::set_socket_timeouts() const
             }
             return std::nullopt;
         }
+
         buffer.append(temp, bytes_received);
         if (m_config.debug) {
             const std::string_view chunk(temp, bytes_received);
@@ -109,11 +110,13 @@ void ClientHandler::set_socket_timeouts() const
             LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Hex: {}", m_sock.get(), m_connection_id,
                                   request_id, to_hex(chunk)));
         }
+
         header_end = buffer.find("\r\n\r\n");
         if (header_end != std::string::npos) {
             header_end += 4;
             return buffer.substr(0, header_end);
         }
+
         if (const size_t alt_end = buffer.find("\n\n"); alt_end != std::string::npos) {
             header_end = alt_end + 2;
             std::string normalized = buffer.substr(0, alt_end) + "\r\n\r\n" + buffer.substr(alt_end + 2);
@@ -127,7 +130,7 @@ void ClientHandler::set_socket_timeouts() const
 }
 
 [[nodiscard]] std::optional<size_t> ClientHandler::get_content_length(const std::string &headers,
-                                                                      RequestId request_id) const
+                                                                      const RequestId request_id) const
 {
     size_t count = 0;
     size_t pos = 0;
@@ -205,7 +208,7 @@ bool ClientHandler::read_body(std::string &buffer, size_t content_length, const 
     return true;
 }
 
-std::optional<std::string> ClientHandler::read_requests(RequestId request_id) const
+std::optional<std::string> ClientHandler::read_requests(const RequestId request_id) const
 {
     std::string buffer;
     buffer.reserve(REQUEST_BUFFER_SIZE);
@@ -232,7 +235,7 @@ std::optional<std::string> ClientHandler::read_requests(RequestId request_id) co
     return buffer;
 }
 
-void ClientHandler::send_raw(const HttpResponse &response, RequestId request_id) const
+void ClientHandler::send_raw(const HttpResponse &response, const RequestId request_id) const
 {
     std::visit(
         [&](const auto &body) {
