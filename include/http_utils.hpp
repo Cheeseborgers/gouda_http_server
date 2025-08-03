@@ -8,13 +8,13 @@
 #include <utility>
 #include <vector>
 
-inline HttpResponse make_response(const HttpStatusCode code, std::string_view content_type, std::string_view body)
+inline HttpResponse make_response(const HttpStatusCode code, const std::string_view content_type, const std::string_view body)
 {
     HttpResponse response(code, std::string(body), std::string(content_type));
     return response;
 }
 
-inline HttpResponse make_response(const HttpStatusCode code, std::string_view content_type, HttpStreamData stream_data)
+inline HttpResponse make_response(const HttpStatusCode code, const std::string_view content_type, HttpStreamData stream_data)
 {
     HttpResponse response(code, std::move(stream_data), std::string(content_type));
     return response;
@@ -193,17 +193,6 @@ inline bool contains_ignore_case(std::string_view str, std::string_view substr)
 
     const auto result = std::ranges::search(lower_str, lower_substr);
     return !result.empty();
-}
-
-// Inject default headers into the response if they are not already set
-inline void inject_default_headers(HttpResponse &response) {
-    if (!response.headers.contains("Server")) {
-        response.set_header("Server", SERVER_NAME_VER);
-    }
-
-    if (!response.headers.contains("X-Powered-By")) {
-        response.set_header("X-Powered-By", POWERED_BY_TEXT);
-    }
 }
 
 inline std::string format_last_modified(const std::filesystem::file_time_type& time) {

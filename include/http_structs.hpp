@@ -2,22 +2,39 @@
 #define HTTP_STRUCTS_HPP
 
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <format>
+#include <filesystem>
+#include <flat_map>
 #include <map>
+#include <optional>
 #include <string>
 #include <variant>
+#include <vector>
 
 #include "http_constants.hpp"
 #include "http_status.hpp"
 #include "types.hpp"
 
+/**
+ * @brief Alias for HTTP request parameters as key-value pairs.
+ */
 using HttpRequestParams = std::map<std::string, std::string>;
 
 //
 // Case-insensitive comparator for header keys
 //
+
+/**
+ * @brief Case-insensitive comparator for HTTP header keys.
+ */
 struct CaseInsensitiveCompare {
+    /**
+     * @brief Compares two strings without case sensitivity.
+     * @param a First string
+     * @param b Second string
+     * @return True if a < b in lowercase comparison
+     */
     bool operator()(const std::string &a, const std::string &b) const
     {
         return std::ranges::lexicographical_compare(
@@ -25,176 +42,246 @@ struct CaseInsensitiveCompare {
     }
 };
 
+/**
+ * @brief Alias for header map using flat_map with case-insensitive keys.
+ */
+using HeaderMap = std::flat_map<std::string, std::string, CaseInsensitiveCompare>;
+
 //
 // HTTP method enum
 //
-enum class HttpMethod : u8 { UNKNOWN, GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, TRACE, CONNECT };
 
+/**
+ * @brief Supported HTTP methods.
+ */
+enum class HttpMethod : u8 {
+    UNKNOWN, ///< Unknown method
+    GET,     ///< GET
+    POST,    ///< POST
+    PUT,     ///< PUT
+    DELETE,  ///< DELETE
+    HEAD,    ///< HEAD
+    OPTIONS, ///< OPTIONS
+    PATCH,   ///< PATCH
+    TRACE,   ///< TRACE
+    CONNECT  ///< CONNECT
+};
+
+/**
+ * @brief Supported HTTP versions.
+ */
 enum class HttpVersion : u8 {
-    HTTP_0_9, // HTTP/0.9
-    HTTP_1_0, // HTTP/1.0
-    HTTP_1_1, // HTTP/1.1
-    HTTP_2_0, // HTTP/2
-    HTTP_3_0  // HTTP/3
+    HTTP_0_9, ///< HTTP/0.9
+    HTTP_1_0, ///< HTTP/1.0
+    HTTP_1_1, ///< HTTP/1.1
+    HTTP_2_0, ///< HTTP/2
+    HTTP_3_0  ///< HTTP/3
 };
 
+/**
+ * @brief Represents a byte range for partial HTTP requests.
+ */
 struct HttpRequestRange {
-    u64 start;
-    u64 end; // Inclusive
+    u64 start{0}; ///< Starting byte index
+    u64 end{0};   ///< Ending byte index (inclusive)
 };
 
+/**
+ * @brief Represents a streamable HTTP file response.
+ */
 struct HttpStreamData {
-    std::filesystem::path file_path;
-    u64 file_size;
-    u64 offset; // For range requests
+    std::filesystem::path file_path; ///< File path
+    u64 file_size{0};                ///< Size of the file
+    u64 offset{0};                   ///< Offset for range-based streaming
 };
 
-//
-// HTTP request
-//
+/**
+ * @brief Represents a full HTTP request.
+ */
 struct HttpRequest {
-    HttpMethod method{HttpMethod::UNKNOWN};
-    HttpVersion version{HttpVersion::HTTP_1_1};
-    std::string path;
-    std::map<std::string, std::string, CaseInsensitiveCompare> headers;
-    std::string body;
-    std::string raw; // full raw request
-    std::optional<HttpRequestRange> range;
-    std::map<std::string, std::vector<std::string>> query_params;
-    std::map<std::string, std::vector<std::string>> form_params;
+    HttpMethod method{HttpMethod::UNKNOWN};                       ///< HTTP method
+    HttpVersion version{HttpVersion::HTTP_1_1};                   ///< HTTP version
+    std::string path;                                             ///< Request path (e.g., "/index.html")
+    HeaderMap headers;                                            ///< HTTP headers
+    std::string body;                                             ///< Request body
+    std::string raw;                                              ///< Full raw request string
+    std::optional<HttpRequestRange> range;                        ///< Optional byte range
+    std::map<std::string, std::vector<std::string>> query_params; ///< Query parameters
+    std::map<std::string, std::vector<std::string>> form_params;  ///< Form parameters
+
+    /**
+     * @brief Sets or replaces an HTTP request header.
+     * @param key Header name
+     * @param value Header value
+     */
+    void set_header(std::string key, std::string value) { headers.emplace(std::move(key), std::move(value)); }
+
+    /**
+     * @brief Gets the value of a header if it exists.
+     * @param key Header name
+     * @return std::optional<std::string_view> containing the value, if present
+     */
+    [[nodiscard]] std::optional<std::string_view> get_header(const std::string_view key) const
+    {
+        if (const auto it = headers.find(std::string(key)); it != headers.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    /**
+     * @brief Checks if a header exists.
+     * @param key Header name
+     * @return bool true if present
+     */
+    [[nodiscard]] bool has_header(const std::string_view key) const { return headers.contains(std::string(key)); }
 };
 
-//
-// HTTP response
-//
+/**
+ * @brief Represents an HTTP response to be sent back to the client.
+ */
 struct HttpResponse {
-    HttpStatusCode status_code{HttpStatusCode::OK};
-    std::string content_type{"text/plain; charset=utf-8"};  // Default content-type
-    std::map<std::string, std::string, CaseInsensitiveCompare> headers;
-    std::variant<std::string, HttpStreamData> body;
+    HttpStatusCode status_code{HttpStatusCode::OK};                 ///< HTTP status code
+    std::string content_type{std::string(CONTENT_TYPE_PLAIN_UTF8)}; ///< MIME type
+    HeaderMap headers;                                              ///< Response headers
+    std::variant<std::string, HttpStreamData> body;                 ///< Body (text or file stream)
 
-    HttpResponse() {
-        // Set default headers on construction
-        set_default_headers();
-    }
+    /**
+     * @brief Default constructor. Sets default headers.
+     */
+    HttpResponse() { set_default_headers(); }
 
-    explicit HttpResponse(const HttpStatusCode status_code,
-                          const std::string &body = {},
-                          const std::string_view content_type_ = "text/plain; charset=utf-8")
-        : status_code{status_code}, content_type{content_type_}, body{body}
+    /**
+     * @brief Constructs a response with plain text body.
+     * @param status_code HTTP status code
+     * @param body Response body (string)
+     * @param content_type_ Content-Type header value
+     */
+    explicit HttpResponse(const HttpStatusCode status_code, const std::string &body = {},
+                          const std::string_view content_type_ = std::string(CONTENT_TYPE_PLAIN_UTF8))
+        : status_code{status_code}, content_type{std::string(content_type_)}, body{body}
     {
         set_default_headers();
         set_header("Content-Type", content_type);
     }
 
-    explicit HttpResponse(const HttpStatusCode status_code,
-                          HttpStreamData body,
-                          const std::string_view content_type_ = "application/octet-stream")
-        : status_code{status_code}, content_type{content_type_}, body{std::move(body)}
+    /**
+     * @brief Constructs a response with streamable file data.
+     * @param status_code HTTP status code
+     * @param body File stream data
+     * @param content_type_ Content-Type header value
+     */
+    explicit HttpResponse(const HttpStatusCode status_code, HttpStreamData body,
+                          const std::string_view content_type_ = CONTENT_TYPE_OCTET_STREAM)
+        : status_code{status_code}, content_type{std::string(content_type_)}, body{std::move(body)}
     {
         set_default_headers();
         set_header("Content-Type", content_type);
     }
 
-    void set_header(const std::string_view key, const std::string_view value) {
-        headers[std::string(key)] = std::string(value);
+    /**
+     * @brief Sets or replaces an HTTP response header.
+     * @param key Header name
+     * @param value Header value
+     */
+    void set_header(std::string key, std::string value) { headers.emplace(std::move(key), std::move(value)); }
+
+    /**
+     * @brief Gets the value of a header if it exists.
+     * @param key Header name
+     * @return std::optional<std::string_view> containing the value, if present
+     */
+    [[nodiscard]] std::optional<std::string_view> get_header(const std::string_view key) const
+    {
+        if (const auto it = headers.find(std::string(key)); it != headers.end()) {
+            return it->second;
+        }
+        return std::nullopt;
     }
+
+    /**
+     * @brief Checks if a header exists.
+     * @param key Header name
+     * @return bool true if present
+     */
+    [[nodiscard]] bool has_header(const std::string_view key) const { return headers.contains(std::string(key)); }
 
 private:
-    void set_default_headers() {
-        if (!headers.contains("X-Powered-By")) {
-            headers["X-Powered-By"] = POWERED_BY_TEXT;
-        }
-
-        if (!headers.contains("Server")) {
-            headers["Server"] = SERVER_NAME_VER;
-        }
-
-        // Content-Type is set in constructors explicitly
+    /**
+     * @brief Adds default headers like Server and X-Powered-By.
+     */
+    void set_default_headers()
+    {
+        headers.try_emplace("X-Powered-By", POWERED_BY_TEXT);
+        headers.try_emplace("Server", SERVER_NAME_VERSION);
     }
 };
 
 //
-// Helpers
+// Enum string maps
 //
-// Convert Method enum to string
-inline std::string_view method_to_string_view(const HttpMethod method)
+
+/**
+ * @brief Lookup table for converting HttpMethod to string.
+ */
+constexpr std::array method_strings{"UNKNOWN", "GET",     "POST",  "PUT",   "DELETE",
+                                    "HEAD",    "OPTIONS", "PATCH", "TRACE", "CONNECT"};
+
+/**
+ * @brief Converts an HttpMethod enum to its string representation.
+ * @param method HTTP method
+ * @return Corresponding method as string view
+ */
+constexpr std::string_view method_to_string_view(HttpMethod method)
 {
-    switch (method) {
-        case HttpMethod::GET:
-            return "GET";
-        case HttpMethod::POST:
-            return "POST";
-        case HttpMethod::PUT:
-            return "PUT";
-        case HttpMethod::DELETE:
-            return "DELETE";
-        case HttpMethod::HEAD:
-            return "HEAD";
-        case HttpMethod::OPTIONS:
-            return "OPTIONS";
-        case HttpMethod::PATCH:
-            return "PATCH";
-        case HttpMethod::TRACE:
-            return "TRACE";
-        case HttpMethod::CONNECT:
-            return "CONNECT";
-        default:
-            return "UNKNOWN";
-    }
+    const auto index = static_cast<std::underlying_type_t<HttpMethod>>(method);
+    return index < method_strings.size() ? method_strings[index] : "UNKNOWN";
 }
 
-// Parse method string to Method enum
+/**
+ * @brief Parses a method string to its corresponding HttpMethod enum.
+ * @param method_str String representation of the HTTP method
+ * @return Corresponding HttpMethod
+ */
 inline HttpMethod get_method(const std::string_view method_str)
 {
-    if (method_str == "GET")
-        return HttpMethod::GET;
-    if (method_str == "POST")
-        return HttpMethod::POST;
-    if (method_str == "PUT")
-        return HttpMethod::PUT;
-    if (method_str == "DELETE")
-        return HttpMethod::DELETE;
-    if (method_str == "HEAD")
-        return HttpMethod::HEAD;
-    if (method_str == "OPTIONS")
-        return HttpMethod::OPTIONS;
-    if (method_str == "PATCH")
-        return HttpMethod::PATCH;
-    if (method_str == "TRACE")
-        return HttpMethod::TRACE;
-    if (method_str == "CONNECT")
-        return HttpMethod::CONNECT;
+    for (size_t i = 0; i < method_strings.size(); ++i) {
+        if (method_strings[i] == method_str)
+            return static_cast<HttpMethod>(i);
+    }
     return HttpMethod::UNKNOWN;
 }
 
-inline std::string_view http_version_to_string_view(const HttpVersion version)
+/**
+ * @brief Lookup table for converting HttpVersion to string.
+ */
+constexpr std::array version_strings{"HTTP/0.9", "HTTP/1.0", "HTTP/1.1", "HTTP/2", "HTTP/3"};
+
+/**
+ * @brief Converts an HttpVersion enum to its string representation.
+ * @param version HTTP version
+ * @return Corresponding version as string view
+ */
+constexpr std::string_view http_version_to_string_view(HttpVersion version)
 {
-    switch (version) {
-        case HttpVersion::HTTP_0_9:
-            return "HTTP/0.9";
-        case HttpVersion::HTTP_1_0:
-            return "HTTP/1.0";
-        case HttpVersion::HTTP_1_1:
-            return "HTTP/1.1";
-        case HttpVersion::HTTP_2_0:
-            return "HTTP/2";
-        case HttpVersion::HTTP_3_0:
-            return "HTTP/3";
-        default:
-            return "UNKNOWN";
-    }
+    const auto index = static_cast<std::underlying_type_t<HttpVersion>>(version);
+    return index < version_strings.size() ? version_strings[index] : "UNKNOWN";
 }
 
+/**
+ * @brief Parses a version string to its corresponding HttpVersion enum.
+ * @param str String representation of the HTTP version
+ * @return Corresponding HttpVersion
+ */
 inline HttpVersion string_to_http_version(const std::string_view str)
 {
-    static const std::unordered_map<std::string, HttpVersion> map = {{"HTTP/0.9", HttpVersion::HTTP_0_9},
-                                                                     {"HTTP/1.0", HttpVersion::HTTP_1_0},
-                                                                     {"HTTP/1.1", HttpVersion::HTTP_1_1},
-                                                                     {"HTTP/2", HttpVersion::HTTP_2_0},
-                                                                     {"HTTP/3", HttpVersion::HTTP_3_0}};
-    const auto it = map.find(str.data());
-    return it != map.end() ? it->second : HttpVersion::HTTP_1_1; // Default to 1.1
+    static const std::flat_map<std::string_view, HttpVersion> map{{"HTTP/0.9", HttpVersion::HTTP_0_9},
+                                                                  {"HTTP/1.0", HttpVersion::HTTP_1_0},
+                                                                  {"HTTP/1.1", HttpVersion::HTTP_1_1},
+                                                                  {"HTTP/2", HttpVersion::HTTP_2_0},
+                                                                  {"HTTP/3", HttpVersion::HTTP_3_0}};
+    const auto it = map.find(str);
+    return it != map.end() ? it->second : HttpVersion::HTTP_1_1;
 }
 
 #endif // HTTP_STRUCTS_HPP

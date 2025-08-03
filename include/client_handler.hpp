@@ -15,7 +15,7 @@ struct ClientHandlerConfig {
     int max_requests = DEFAULT_MAX_REQUESTS;
     size_t max_header_size = DEFAULT_MAX_HEADER_SIZE;           // 8KB max for headers
     size_t max_content_length = DEFAULT_MAX_CONTENT_LENGTH;     // 1MB max for body
-    bool debug = true;                                         // Enable verbose logging
+    bool debug = true;                                          // Enable verbose logging
     size_t stream_buffer_size = DEFAULT_MAX_STREAM_BUFFER_SIZE; // 64KB max for stream buffer
 };
 
@@ -24,12 +24,12 @@ public:
     explicit ClientHandler(Socket sock, const ClientHandlerConfig &config = ClientHandlerConfig{});
 
     // Allow move construction
-    ClientHandler(ClientHandler&&) = default;
-    ClientHandler& operator=(ClientHandler&&) = default;
+    ClientHandler(ClientHandler &&) = default;
+    ClientHandler &operator=(ClientHandler &&) = default;
 
     // Delete copy
-    ClientHandler(const ClientHandler&) = delete;
-    ClientHandler& operator=(const ClientHandler&) = delete;
+    ClientHandler(const ClientHandler &) = delete;
+    ClientHandler &operator=(const ClientHandler &) = delete;
 
     void handle() const;
 
@@ -38,11 +38,13 @@ private:
     [[nodiscard]] bool should_keep_alive(const HttpRequest &request) const;
     [[nodiscard]] std::optional<std::string> read_headers(std::string &buffer, RequestId request_id) const;
     [[nodiscard]] std::optional<size_t> get_content_length(const std::string &headers, RequestId request_id) const;
-    [[nodiscard]] bool read_body(std::string &buffer, size_t content_length, size_t header_end, RequestId request_id) const;
+    [[nodiscard]] bool read_body(std::string &buffer, size_t content_length, size_t header_end,
+                                 RequestId request_id) const;
     [[nodiscard]] std::optional<std::string> read_requests(RequestId request_id) const;
     void send_raw(const HttpResponse &response, RequestId request_id) const;
     void send_error_response(HttpStatusCode code, std::string_view body, std::string_view content_type,
-                                        RequestId request_id) const;
+                             RequestId request_id) const;
+    void send_error_response(HttpStatusCode code, std::string_view content_type, RequestId request_id) const;
     [[nodiscard]] std::optional<bool> process_single_request() const;
 
 private:

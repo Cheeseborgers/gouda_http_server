@@ -6,14 +6,16 @@
 #define HTTP_CONSTANT_HPP
 #include <string_view>
 
-static constexpr std::string_view SERVER_NAME_VER = "GoudaWebserver/1.0";
+static constexpr std::string_view SERVER_NAME_VERSION = "GoudaWebserver/1.0";
 static constexpr std::string_view POWERED_BY_TEXT = "C++23 and ☕";
 
 static constexpr std::string_view LOCALHOST = "127.0.0.1";
 
 static constexpr std::string_view CONTENT_TYPE_PLAIN{"text/plain"};
+static constexpr std::string_view CONTENT_TYPE_PLAIN_UTF8{"text/plain; charset=utf-8"};
 static constexpr std::string_view CONTENT_TYPE_HTML{"text/html"};
 static constexpr std::string_view CONTENT_TYPE_JSON{"application/json"};
+static constexpr std::string_view CONTENT_TYPE_OCTET_STREAM{"application/octet-stream"};
 static constexpr std::string_view CONTENT_TYPE_FORM_URLENCODED{"application/x-www-form-urlencoded"};
 static constexpr std::string_view CONTENT_TYPE_PLAIN_FULL{"Content-Type: text/plain"};
 static constexpr std::string_view CONTENT_TYPE_HTML_FULL{"Content-Type: text/html"};
@@ -24,7 +26,7 @@ static constexpr int REQUEST_BODY_BUFFER_SIZE{512};
 static constexpr int REQUEST_HEADERS_BUFFER_SIZE{512};
 
 static constexpr int DEFAULT_POLL_INTERVAL{100};
-static constexpr uint8_t DEFAULT_RECV_TIMEOUT{10};
+static constexpr uint8_t DEFAULT_RECV_TIMEOUT{5};
 static constexpr uint8_t DEFAULT_SEND_TIMEOUT{5};
 static constexpr uint8_t DEFAULT_MAX_REQUESTS{100};
 static constexpr size_t DEFAULT_MAX_HEADER_SIZE{8192};

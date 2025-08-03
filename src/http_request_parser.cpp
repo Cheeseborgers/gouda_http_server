@@ -44,9 +44,9 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request_vie
     req.method = get_method(first_line.substr(0, method_end));
     std::string_view full_path = first_line.substr(method_end + 1, path_end - method_end - 1);
     // Split path and query parameters
-    if (size_t query_start = full_path.find('?'); query_start != std::string_view::npos) {
+    if (const size_t query_start = full_path.find('?'); query_start != std::string_view::npos) {
         req.path = std::string(full_path.substr(0, query_start));
-        std::string_view query = full_path.substr(query_start + 1);
+        const std::string_view query = full_path.substr(query_start + 1);
         parse_query_params(query, req.query_params, request_id, debug);
     }
     else {
@@ -65,7 +65,7 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request_vie
         }
     }
 
-    for (std::string_view headers_block = request_view.substr(first_line_end + 2, headers_end - first_line_end - 2);
+    for (const std::string_view headers_block = request_view.substr(first_line_end + 2, headers_end - first_line_end - 2);
          const auto &line : split_lines(headers_block)) {
         if (line.empty()) {
             continue;
@@ -80,7 +80,7 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request_vie
         std::string_view key = trim(line.substr(0, colon_pos));
         std::string_view value = trim(line.substr(colon_pos + 1));
         std::string key_lower = to_lowercase(key);
-        req.headers[key_lower] = value;
+        req.set_header(key_lower, std::string(key));
 
         if (key_lower == "range") {
             std::regex range_regex(R"(bytes=(\d+)-(\d*))");
@@ -114,13 +114,13 @@ std::optional<HttpRequest> HttpRequestParser::parse(std::string_view request_vie
     }
 
     if (headers_end + 4 < request_view.size()) {
-        std::string_view body = request_view.substr(headers_end + 4);
+        const std::string_view body = request_view.substr(headers_end + 4);
         req.body = std::string(body);
         if (debug) {
             LOG_DEBUG(std::format("Request[{}]: Parsed body ({} bytes)", request_id, body.size()));
         }
         if (req.method == HttpMethod::POST) {
-            if (auto content_type_iterator = req.headers.find("content-type");
+            if (const auto content_type_iterator = req.headers.find("content-type");
                 content_type_iterator != req.headers.end() &&
                 content_type_iterator->second.find(CONTENT_TYPE_FORM_URLENCODED) != std::string::npos) {
                 parse_query_params(body, req.form_params, request_id, debug);

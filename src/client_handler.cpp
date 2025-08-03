@@ -80,7 +80,8 @@ void ClientHandler::set_socket_timeouts() const
     return request.version == HttpVersion::HTTP_1_1;
 }
 
-[[nodiscard]] std::optional<std::string> ClientHandler::read_headers(std::string &buffer, const RequestId request_id) const
+[[nodiscard]] std::optional<std::string> ClientHandler::read_headers(std::string &buffer,
+                                                                     const RequestId request_id) const
 {
     char temp[REQUEST_HEADERS_BUFFER_SIZE];
     size_t header_end = std::string::npos;
@@ -94,6 +95,9 @@ void ClientHandler::set_socket_timeouts() const
             else if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 LOG_WARNING(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv timeout", m_sock.get(),
                                         m_connection_id, request_id));
+                // TODO: Check that the return content types for these errors are correct
+                send_error_response(HttpStatusCode::REQUEST_TIMEOUT, CONTENT_TYPE_PLAIN, request_id);
+                return std::nullopt;
             }
             else {
                 LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv error: {}", m_sock.get(),
@@ -334,6 +338,12 @@ void ClientHandler::send_error_response(const HttpStatusCode code, std::string_v
     HttpResponse error_response{code, body.data(), content_type.data()};
     error_response.set_header("Connection", "close");
     send_raw(error_response, request_id);
+}
+
+void ClientHandler::send_error_response(const HttpStatusCode code, const std::string_view content_type,
+                                        const RequestId request_id) const
+{
+    send_error_response(code, status_code_to_string_view(code), content_type, request_id);
 }
 
 [[nodiscard]] std::optional<bool> ClientHandler::process_single_request() const

@@ -4,94 +4,182 @@
 #ifndef HTTP_STATUS_HPP
 #define HTTP_STATUS_HPP
 
-#include <string>
+#include <string_view>
 
-enum class HttpStatusCode {
+#include "types.hpp"
+
+/**
+ * @brief Enumeration of standard HTTP status codes as defined by RFCs.
+ */
+enum class HttpStatusCode : u16 {
+    //
     // 1xx – Informational
-    CONTINUE = 100,
-    SWITCHING_PROTOCOLS = 101,
-    PROCESSING = 102,
+    //
 
+    CONTINUE = 100,            ///< Request received, continuing process.
+    SWITCHING_PROTOCOLS = 101, ///< Switching to another protocol.
+    PROCESSING = 102,          ///< WebDAV: Server has received and is processing the request.
+    EARLY_HINTS = 103,         ///< Hints that the server is likely to send the final response.
+
+    //
     // 2xx – Success
-    OK = 200,
-    CREATED = 201,
-    ACCEPTED = 202,
-    NO_CONTENT = 204,
-    PARTIAL_CONTENT = 206,
+    //
 
+    OK = 200,                            ///< Request succeeded.
+    CREATED = 201,                       ///< Resource created.
+    ACCEPTED = 202,                      ///< Request accepted, processing pending.
+    NON_AUTHORITATIVE_INFORMATION = 203, ///< Metadata returned from a transforming proxy.
+    NO_CONTENT = 204,                    ///< No content to return.
+    RESET_CONTENT = 205,                 ///< Reset the document view.
+    PARTIAL_CONTENT = 206,               ///< Partial resource delivered.
+    MULTI_STATUS = 207,                  ///< WebDAV: Multiple responses.
+    ALREADY_REPORTED = 208,              ///< WebDAV: Members already reported.
+    IM_USED = 226,                       ///< RFC 3229: Delta encoding response.
+
+    //
     // 3xx – Redirection
-    MOVED_PERMANENTLY = 301,
-    FOUND = 302,
-    SEE_OTHER = 303,
-    NOT_MODIFIED = 304,
-    TEMPORARY_REDIRECT = 307,
-    PERMANENT_REDIRECT = 308,
+    //
 
+    MULTIPLE_CHOICES = 300,   ///< Multiple options for the resource.
+    MOVED_PERMANENTLY = 301,  ///< Resource moved permanently.
+    FOUND = 302,              ///< Resource found (temporary).
+    SEE_OTHER = 303,          ///< See another URI using GET.
+    NOT_MODIFIED = 304,       ///< Resource not modified.
+    USE_PROXY = 305,          ///< Deprecated: Use proxy.
+    SWITCH_PROXY = 306,       ///< No longer used.
+    TEMPORARY_REDIRECT = 307, ///< Resource temporarily at another URI.
+    PERMANENT_REDIRECT = 308, ///< Resource permanently at another URI.
+
+    //
     // 4xx – Client Errors
-    BAD_REQUEST = 400,
-    UNAUTHORIZED = 401,
-    FORBIDDEN = 403,
-    NOT_FOUND = 404,
-    METHOD_NOT_ALLOWED = 405,
-    CONFLICT = 409,
-    PAYLOAD_TOO_LARGE = 413,
-    UNSUPPORTED_MEDIA_TYPE = 415,
-    TOO_MANY_REQUESTS = 429,
-    RANGE_NOT_SATISFIABLE = 416,
+    //
 
+    BAD_REQUEST = 400,                     ///< Malformed request.
+    UNAUTHORIZED = 401,                    ///< Authentication required.
+    PAYMENT_REQUIRED = 402,                ///< Reserved for future use.
+    FORBIDDEN = 403,                       ///< Request understood but refused.
+    NOT_FOUND = 404,                       ///< Resource not found.
+    METHOD_NOT_ALLOWED = 405,              ///< HTTP method not allowed.
+    NOT_ACCEPTABLE = 406,                  ///< Resource not acceptable.
+    PROXY_AUTHENTICATION_REQUIRED = 407,   ///< Authentication with proxy required.
+    REQUEST_TIMEOUT = 408,                 ///< Request timed out.
+    CONFLICT = 409,                        ///< Request conflict.
+    GONE = 410,                            ///< Resource no longer available.
+    LENGTH_REQUIRED = 411,                 ///< Content-Length header missing.
+    PRECONDITION_FAILED = 412,             ///< Preconditions failed.
+    PAYLOAD_TOO_LARGE = 413,               ///< Payload too large.
+    URI_TOO_LONG = 414,                    ///< URI too long.
+    UNSUPPORTED_MEDIA_TYPE = 415,          ///< Unsupported media type.
+    RANGE_NOT_SATISFIABLE = 416,           ///< Requested range not satisfiable.
+    EXPECTATION_FAILED = 417,              ///< Expectation failed.
+    IM_A_TEAPOT = 418,                     ///< April Fools joke (RFC 2324).
+    MISDIRECTED_REQUEST = 421,             ///< Request misdirected to wrong server.
+    UNPROCESSABLE_ENTITY = 422,            ///< WebDAV: Semantic errors in request.
+    LOCKED = 423,                          ///< WebDAV: Resource is locked.
+    FAILED_DEPENDENCY = 424,               ///< WebDAV: Failed due to another request.
+    TOO_EARLY = 425,                       ///< Premature request.
+    UPGRADE_REQUIRED = 426,                ///< Protocol upgrade required.
+    PRECONDITION_REQUIRED = 428,           ///< Requires conditional request.
+    TOO_MANY_REQUESTS = 429,               ///< Rate limit exceeded.
+    REQUEST_HEADER_FIELDS_TOO_LARGE = 431, ///< Request headers too large.
+    UNAVAILABLE_FOR_LEGAL_REASONS = 451,   ///< Access denied due to legal reasons.
+
+    //
     // 5xx – Server Errors
-    INTERNAL_SERVER_ERROR = 500,
-    NOT_IMPLEMENTED = 501,
-    BAD_GATEWAY = 502,
-    SERVICE_UNAVAILABLE = 503,
-    GATEWAY_TIMEOUT = 504,
-    HTTP_VERSION_NOT_SUPPORTED = 505
+    //
+
+    INTERNAL_SERVER_ERROR = 500,          ///< Internal server error.
+    NOT_IMPLEMENTED = 501,                ///< Not implemented.
+    BAD_GATEWAY = 502,                    ///< Invalid response from upstream server.
+    SERVICE_UNAVAILABLE = 503,            ///< Service temporarily unavailable.
+    GATEWAY_TIMEOUT = 504,                ///< Upstream server timeout.
+    HTTP_VERSION_NOT_SUPPORTED = 505,     ///< HTTP version unsupported.
+    VARIANT_ALSO_NEGOTIATES = 506,        ///< Negotiation failed.
+    INSUFFICIENT_STORAGE = 507,           ///< WebDAV: Storage capacity full.
+    LOOP_DETECTED = 508,                  ///< WebDAV: Infinite loop detected.
+    NOT_EXTENDED = 510,                   ///< Further extensions required.
+    NETWORK_AUTHENTICATION_REQUIRED = 511 ///< Network authentication required.
 };
 
-inline std::string status_code_to_string(const HttpStatusCode code) {
-    switch (code) {
-        // 1xx – Informational
-        case HttpStatusCode::CONTINUE: return "Continue";
-        case HttpStatusCode::SWITCHING_PROTOCOLS: return "Switching Protocols";
-        case HttpStatusCode::PROCESSING: return "Processing";
+constexpr std::array<std::string_view, 512> http_status_messages = [] {
+    std::array<std::string_view, 512> arr{};
 
-        // 2xx – Success
-        case HttpStatusCode::OK: return "OK";
-        case HttpStatusCode::CREATED: return "Created";
-        case HttpStatusCode::ACCEPTED: return "Accepted";
-        case HttpStatusCode::NO_CONTENT: return "No Content";
-        case HttpStatusCode::PARTIAL_CONTENT: return "Partial Content";
+    arr[100] = "Continue";
+    arr[101] = "Switching Protocols";
+    arr[102] = "Processing";
+    arr[103] = "Early Hints";
 
-        // 3xx – Redirection
-        case HttpStatusCode::MOVED_PERMANENTLY: return "Moved Permanently";
-        case HttpStatusCode::FOUND: return "Found";
-        case HttpStatusCode::SEE_OTHER: return "See Other";
-        case HttpStatusCode::NOT_MODIFIED: return "Not Modified";
-        case HttpStatusCode::TEMPORARY_REDIRECT: return "Temporary Redirect";
-        case HttpStatusCode::PERMANENT_REDIRECT: return "Permanent Redirect";
+    arr[200] = "OK";
+    arr[201] = "Created";
+    arr[202] = "Accepted";
+    arr[203] = "Non-Authoritative Information";
+    arr[204] = "No Content";
+    arr[205] = "Reset Content";
+    arr[206] = "Partial Content";
+    arr[207] = "Multi-Status";
+    arr[208] = "Already Reported";
+    arr[226] = "IM Used";
 
-        // 4xx – Client Errors
-        case HttpStatusCode::BAD_REQUEST: return "Bad Request";
-        case HttpStatusCode::UNAUTHORIZED: return "Unauthorized";
-        case HttpStatusCode::FORBIDDEN: return "Forbidden";
-        case HttpStatusCode::NOT_FOUND: return "Not Found";
-        case HttpStatusCode::METHOD_NOT_ALLOWED: return "Method Not Allowed";
-        case HttpStatusCode::CONFLICT: return "Conflict";
-        case HttpStatusCode::PAYLOAD_TOO_LARGE: return "Payload Too Large";
-        case HttpStatusCode::UNSUPPORTED_MEDIA_TYPE: return "Unsupported Media Type";
-        case HttpStatusCode::TOO_MANY_REQUESTS: return "Too Many Requests";
-        case HttpStatusCode::RANGE_NOT_SATISFIABLE: return "Range Not Satisfiable";
+    arr[300] = "Multiple Choices";
+    arr[301] = "Moved Permanently";
+    arr[302] = "Found";
+    arr[303] = "See Other";
+    arr[304] = "Not Modified";
+    arr[305] = "Use Proxy";
+    arr[306] = "Switch Proxy";
+    arr[307] = "Temporary Redirect";
+    arr[308] = "Permanent Redirect";
 
-        // 5xx – Server Errors
-        case HttpStatusCode::INTERNAL_SERVER_ERROR: return "Internal Server Error";
-        case HttpStatusCode::NOT_IMPLEMENTED: return "Not Implemented";
-        case HttpStatusCode::BAD_GATEWAY: return "Bad Gateway";
-        case HttpStatusCode::SERVICE_UNAVAILABLE: return "Service Unavailable";
-        case HttpStatusCode::GATEWAY_TIMEOUT: return "Gateway Timeout";
-        case HttpStatusCode::HTTP_VERSION_NOT_SUPPORTED: return "HTTP Version Not Supported";
+    arr[400] = "Bad Request";
+    arr[401] = "Unauthorized";
+    arr[402] = "Payment Required";
+    arr[403] = "Forbidden";
+    arr[404] = "Not Found";
+    arr[405] = "Method Not Allowed";
+    arr[406] = "Not Acceptable";
+    arr[407] = "Proxy Authentication Required";
+    arr[408] = "Request Timeout";
+    arr[409] = "Conflict";
+    arr[410] = "Gone";
+    arr[411] = "Length Required";
+    arr[412] = "Precondition Failed";
+    arr[413] = "Payload Too Large";
+    arr[414] = "URI Too Long";
+    arr[415] = "Unsupported Media Type";
+    arr[416] = "Range Not Satisfiable";
+    arr[417] = "Expectation Failed";
+    arr[418] = "I'm a teapot";
+    arr[421] = "Misdirected Request";
+    arr[422] = "Unprocessable Entity";
+    arr[423] = "Locked";
+    arr[424] = "Failed Dependency";
+    arr[425] = "Too Early";
+    arr[426] = "Upgrade Required";
+    arr[428] = "Precondition Required";
+    arr[429] = "Too Many Requests";
+    arr[431] = "Request Header Fields Too Large";
+    arr[451] = "Unavailable For Legal Reasons";
 
-        default: return "Unknown";
+    arr[500] = "Internal Server Error";
+    arr[501] = "Not Implemented";
+    arr[502] = "Bad Gateway";
+    arr[503] = "Service Unavailable";
+    arr[504] = "Gateway Timeout";
+    arr[505] = "HTTP Version Not Supported";
+    arr[506] = "Variant Also Negotiates";
+    arr[507] = "Insufficient Storage";
+    arr[508] = "Loop Detected";
+    arr[510] = "Not Extended";
+    arr[511] = "Network Authentication Required";
+
+    return arr;
+}();
+
+constexpr std::string_view status_code_to_string_view(HttpStatusCode code) {
+    if (const u16 index = static_cast<u16>(code); index < http_status_messages.size() && !http_status_messages[index].empty()) {
+        return http_status_messages[index];
     }
+    return "Unknown";
 }
 
 #endif // HTTP_STATUS_HPP
