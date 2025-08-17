@@ -8,6 +8,7 @@
 #include "types.hpp"
 
 // Helper function to encode websocket payload length
+/*
 inline void encode_payload_length(const u64 length, std::string& frame) {
     if (length <= 125) {
         frame += static_cast<char>(length);
@@ -22,5 +23,5 @@ inline void encode_payload_length(const u64 length, std::string& frame) {
         }
     }
 }
-
+*/
 #endif //WEBSOCKET_HPP

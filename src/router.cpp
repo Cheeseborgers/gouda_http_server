@@ -13,23 +13,43 @@ std::filesystem::path Router::s_static_files_directory{"static"};
 std::string Router::s_static_url_prefix{"/assets/"};
 std::unordered_map<HttpMethod, std::vector<Router::Route>> Router::s_routes_by_method;
 std::vector<Router::Middleware> Router::s_middlewares;
+std::vector<std::string> Router::s_allowed_origins{"http://localhost:8080"};
 
 HttpResponse Router::route(const HttpRequest &request, const std::optional<Json> &json_body,
                            const ConnectionId connection_id, const RequestId request_id)
 {
     LOG_DEBUG(std::format("Request[{}]: {} {}", request_id, method_to_string_view(request.method), request.path));
 
-    // Check for and handle websocket requests first
+    // TODO: Think if we want a way to add/set these origins some other way
+    // Check Origin header
+    if (request.has_header("origin")) {
+        auto origin = request.get_header("origin").value();
+        // Allow only specific origins
+        if (std::ranges::find(s_allowed_origins, origin) == s_allowed_origins.end()) {
+            LOG_WARNING(std::format("Request[{}]: Unauthorized WebSocket origin: {}", request_id, origin));
+            return HttpResponse(HttpStatusCode::FORBIDDEN, Json{{"error", "Unauthorized origin"}}.dump(),
+                                CONTENT_TYPE_JSON);
+        }
+    }
+
+    // Check for and handle WebSocket requests first
     if (request.websocket_data) {
+        // Verify a WebSocket handler exists for the path
+        if (const auto ws_handler = get_websocket_handler(request); !ws_handler) {
+            LOG_ERROR(std::format("Request[{}]: No WebSocket handler for path {}", request_id, request.path));
+            const bool prefers_html = client_prefers_html(request);
+            return HttpResponse(HttpStatusCode::NOT_FOUND,
+                                prefers_html ? ERROR_404_HTML.data()
+                                             : Json{{"error", "No WebSocket handler for path"}}.dump(),
+                                prefers_html ? CONTENT_TYPE_PLAIN_UTF8 : CONTENT_TYPE_JSON);
+        }
         // Handle WebSocket upgrade
         WebSocketResponseData ws_response;
         ws_response.accept_key = HttpRequestParser::compute_websocket_accept(request.websocket_data->key);
-        // Do not include per message-deflate extension
         if (request.websocket_data->protocol) {
             ws_response.protocol = request.websocket_data->protocol;
         }
-        // Explicitly set extensions to empty to reject per message-deflate
-        ws_response.extensions = std::nullopt;
+        ws_response.extensions = std::nullopt; // Reject permessage-deflate
         return HttpResponse(HttpStatusCode::SWITCHING_PROTOCOLS, ws_response);
     }
 

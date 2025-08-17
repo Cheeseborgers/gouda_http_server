@@ -263,7 +263,8 @@ inline void setup_routes()
     Router::add_route(
     GET, "/ws/echo",
     [](const HttpRequest &, const HttpRequestParams &, const std::optional<Json> &) {
-        return HttpResponse(SWITCHING_PROTOCOLS, WebSocketResponseData{});
+        // No response needed; Router::route handles the handshake
+        return HttpResponse(); // Empty response to satisfy the handler signature
     },
     [](const WebSocketFrame &frame, ConnectionId conn_id, RequestId req_id) {
         LOG_DEBUG(std::format("WebSocket[Conn:{}][Req:{}]: Echoing payload: {}", conn_id, req_id, frame.payload));

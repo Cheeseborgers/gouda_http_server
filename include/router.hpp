@@ -72,6 +72,7 @@ private:
     static std::string s_static_url_prefix;
     static std::unordered_map<HttpMethod, std::vector<Route>> s_routes_by_method;
     static std::vector<Middleware> s_middlewares;
+    static std::vector<std::string> s_allowed_origins;
 };
 
 #endif // ROUTER_H

@@ -25,11 +25,12 @@ static constexpr int REQUEST_BUFFER_SIZE{1024};
 static constexpr int REQUEST_BODY_BUFFER_SIZE{512};
 static constexpr int REQUEST_HEADERS_BUFFER_SIZE{512};
 static constexpr int MAX_RESPONSE_SIZE{1024};
+static constexpr uint64_t DEFAULT_MAX_WEBSOCKET_PAYLOAD_SIZE{1 * 1024 * 1024}; // 1MB
 
 static constexpr int DEFAULT_POLL_INTERVAL{100};
 static constexpr std::chrono::seconds DEFAULT_RECV_TIMEOUT{5};
 static constexpr std::chrono::seconds DEFAULT_SEND_TIMEOUT{5};
-static constexpr std::chrono::seconds DEFAULT_WEBSOCKET_TIMEOUT{60};
+static constexpr int DEFAULT_WEBSOCKET_TIMEOUT{60};
 
 static constexpr uint8_t DEFAULT_MAX_REQUESTS{100};
 static constexpr size_t DEFAULT_MAX_HEADER_SIZE{8192};

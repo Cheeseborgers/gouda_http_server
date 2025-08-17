@@ -7,3 +7,16 @@
 // FIX: Ranges on dls
 // TODO: fix 404 response rendering on browsers. currently renders html text rather than rendered
 
+
+
+
+
+
+
+
+
+Connection Throttling (Optional):Limit concurrent WebSocket connections in HttpServer or ClientHandler to prevent resource exhaustion.
+Requires tracking active connections (e.g., in a std::unordered_set<ConnectionId>).
+
+
+

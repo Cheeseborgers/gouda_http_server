@@ -19,10 +19,9 @@ endif()
 
 find_package(nlohmann_json REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 
-add_executable(${PROJECT_NAME}
-        include/websocket.hpp
-)
+add_executable(${PROJECT_NAME})
 
 target_sources(${PROJECT_NAME}
         PRIVATE
@@ -36,6 +35,7 @@ target_sources(${PROJECT_NAME}
         src/router.cpp
         src/http_response_builder.cpp
         src/file_cache.cpp
+        src/websocket_handler.cpp
 )
 
 target_include_directories(${PROJECT_NAME}
@@ -44,4 +44,4 @@ target_include_directories(${PROJECT_NAME}
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)

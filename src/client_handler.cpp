@@ -15,6 +15,7 @@
 #include "router.hpp"
 #include "types.hpp"
 #include "websocket.hpp"
+#include "websocket_handler.hpp"
 
 ClientHandler::ClientHandler(Socket sock, const ClientHandlerConfig &config)
     : m_sock{std::move(sock)}, m_config{config}, m_host_details{}, m_connection_id{0}, m_is_websocket{false}
@@ -549,8 +550,7 @@ void ClientHandler::send_error_response(const HttpStatusCode code, const std::st
     return keep_alive;
 }
 
-bool ClientHandler::process_websocket(RequestId request_id) const
-{
+bool ClientHandler::process_websocket(RequestId request_id) const {
     LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Checking WebSocket handler for path: {}",
                           m_sock.get(), m_connection_id, request_id, m_last_request.path));
 
@@ -561,10 +561,11 @@ bool ClientHandler::process_websocket(RequestId request_id) const
         return false;
     }
 
-    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Entered WebSocket mode", m_sock.get(),
-                          m_connection_id, request_id));
+    WebSocketHandler handler(ws_handler, m_config.websocket_timeout);
+    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Entered WebSocket mode",
+                          m_sock.get(), m_connection_id, request_id));
 
-    if (!m_sock.set_recv_timeout(m_config.websocket_timeout)) {
+    if (!m_sock.set_recv_timeout(std::chrono::seconds(m_config.websocket_timeout))) {
         LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to set WebSocket timeout: {}",
                               m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
         return false;
@@ -572,7 +573,6 @@ bool ClientHandler::process_websocket(RequestId request_id) const
 
     std::string buffer;
     buffer.reserve(REQUEST_BUFFER_SIZE);
-
     while (m_is_websocket) {
         char temp[REQUEST_BUFFER_SIZE];
         ssize_t bytes_received = m_sock.recv(temp, sizeof(temp));
@@ -593,94 +593,14 @@ bool ClientHandler::process_websocket(RequestId request_id) const
         }
 
         buffer.append(temp, bytes_received);
-        if (m_config.debug) {
-            const std::string_view chunk(temp, bytes_received);
-            LOG_DEBUG(
-                std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received WebSocket chunk ({} bytes): [{}]",
-                            m_sock.get(), m_connection_id, request_id, bytes_received, to_hex(chunk)));
+        LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received WebSocket chunk ({} bytes): [{}]",
+                              m_sock.get(), m_connection_id, request_id, bytes_received, to_hex(buffer)));
+
+        if (!handler.process_frame(buffer, m_connection_id, request_id, m_sock)) {
+            return false; // Close frame received or error
         }
 
-        size_t processed_bytes = 0;
-        while (processed_bytes < buffer.size()) {
-            auto frame =
-                HttpRequestParser::parse_websocket_frame(buffer.substr(processed_bytes), m_config.debug, request_id);
-            if (!frame) {
-                break; // Partial frame, wait for more data
-            }
-
-            processed_bytes += 2; // FIN + opcode
-            if (frame->payload_length == 126) {
-                processed_bytes += 2; // Extended payload length (16-bit)
-            }
-            else if (frame->payload_length == 127) {
-                processed_bytes += 8; // Extended payload length (64-bit)
-            }
-            if (frame->mask) {
-                processed_bytes += 4; // Masking key
-            }
-            processed_bytes += frame->payload_length;
-
-            if (frame->opcode == 0x8) { // Close frame
-                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received close frame", m_sock.get(),
-                                      m_connection_id, request_id));
-                const std::string close_frame = "\x88\x00"; // FIN + close opcode, no reason code
-                if (m_sock.send(close_frame.data(), close_frame.size()) < 0) {
-                    LOG_ERROR(
-                        std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to send WebSocket close frame",
-                                    m_sock.get(), m_connection_id, request_id));
-                }
-                return false;
-            }
-
-            if (frame->opcode == 0x9) { // Ping frame
-                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received ping frame", m_sock.get(),
-                                      m_connection_id, request_id));
-                std::string pong_frame;
-                pong_frame += '\x8A'; // FIN + pong opcode
-                encode_payload_length(frame->payload_length, pong_frame);
-                pong_frame += frame->payload;
-                if (m_sock.send(pong_frame.data(), pong_frame.size()) < 0) {
-                    LOG_ERROR(
-                        std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to send WebSocket pong frame",
-                                    m_sock.get(), m_connection_id, request_id));
-                    return false;
-                }
-                continue;
-            }
-
-            if (frame->opcode == 0x1 || frame->opcode == 0x2) { // Text or binary frame
-                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received {} frame (length: {})",
-                                      m_sock.get(), m_connection_id, request_id,
-                                      frame->opcode == 0x1 ? "text" : "binary", frame->payload_length));
-
-                // Route WebSocket frame to handler
-                try {
-                    std::string response_payload = ws_handler(*frame, m_connection_id, request_id);
-                    std::string response_frame;
-                    response_frame += static_cast<char>(0x80 | frame->opcode); // FIN + same opcode
-                    encode_payload_length(response_payload.size(), response_frame);
-                    response_frame += response_payload;
-
-                    if (m_sock.send(response_frame.data(), response_frame.size()) < 0) {
-                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to send WebSocket frame",
-                                              m_sock.get(), m_connection_id, request_id));
-                        return false;
-                    }
-                    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} frame (length: {})",
-                                          m_sock.get(), m_connection_id, request_id,
-                                          frame->opcode == 0x1 ? "text" : "binary", response_payload.size()));
-                }
-                catch (const std::exception& e) {
-                    LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: WebSocket handler error: {}",
-                                          m_sock.get(), m_connection_id, request_id, e.what()));
-                    return false;
-                }
-            }
-
-            buffer.erase(0, processed_bytes);
-            processed_bytes = 0;
-        }
+        buffer.clear(); // Clear after processing
     }
-
     return false;
 }

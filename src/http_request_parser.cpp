@@ -258,7 +258,8 @@ std::optional<WebSocketFrame> HttpRequestParser::parse_websocket_frame(const std
                                 frame_data.size()));
         return std::nullopt;
     }
-    std::array<uint8_t, 4> masking_key;
+
+    std::array<uint8_t, 4> masking_key{};
     std::copy_n(frame_data.begin() + offset, 4, masking_key.begin());
     offset += 4;
 
@@ -266,6 +267,11 @@ std::optional<WebSocketFrame> HttpRequestParser::parse_websocket_frame(const std
     if (frame_data.size() < offset + frame.payload_length) {
         LOG_WARNING(std::format("Request[{}]: WebSocket frame too short for payload ({} bytes, expected {})",
                                 request_id, frame_data.size(), offset + frame.payload_length));
+        return std::nullopt;
+    }
+
+    if (frame.payload_length > DEFAULT_MAX_WEBSOCKET_PAYLOAD_SIZE) {
+        LOG_ERROR(std::format("Request[{}]: WebSocket frame payload too large: {}", request_id, frame.payload_length));
         return std::nullopt;
     }
 
@@ -284,23 +290,23 @@ std::optional<WebSocketFrame> HttpRequestParser::parse_websocket_frame(const std
     return frame;
 }
 
-std::string HttpRequestParser::compute_websocket_accept(const std::string &key)
-{
+std::string HttpRequestParser::compute_websocket_accept(const std::string &key) {
+    // TODO: Check what we gonna do here
     const std::string ws_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     const std::string input = key + ws_guid;
 
     unsigned char hash[SHA_DIGEST_LENGTH];
     SHA1(reinterpret_cast<const unsigned char *>(input.c_str()), input.length(), hash);
 
-    BIO *b64 = BIO_new(BIO_f_base64());
-    BIO *mem = BIO_new(BIO_s_mem());
+    BIO *b64{BIO_new(BIO_f_base64())};
+    BIO *mem{BIO_new(BIO_s_mem())};
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
     BIO_push(b64, mem);
     BIO_write(b64, hash, SHA_DIGEST_LENGTH);
     BIO_flush(b64);
 
-    char *base64_data;
-    const long length = BIO_get_mem_data(mem, &base64_data);
+    char *base64_data{nullptr};
+    const long length{BIO_get_mem_data(mem, &base64_data)};
     std::string result(base64_data, length);
 
     BIO_free_all(b64);

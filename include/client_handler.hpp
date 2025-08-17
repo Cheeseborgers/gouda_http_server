@@ -13,7 +13,7 @@
 struct ClientHandlerConfig {
     std::chrono::seconds recv_timeout = std::chrono::seconds(DEFAULT_RECV_TIMEOUT);
     std::chrono::seconds send_timeout = std::chrono::seconds(DEFAULT_SEND_TIMEOUT);
-    std::chrono::seconds websocket_timeout{std::chrono::seconds(DEFAULT_WEBSOCKET_TIMEOUT)};
+    int websocket_timeout{DEFAULT_WEBSOCKET_TIMEOUT};
     int max_requests = DEFAULT_MAX_REQUESTS;
     size_t max_header_size = DEFAULT_MAX_HEADER_SIZE;           // 8KB max for headers
     size_t max_content_length = DEFAULT_MAX_CONTENT_LENGTH;     // 1MB max for body
