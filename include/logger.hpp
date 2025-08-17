@@ -33,8 +33,8 @@ private:
 
 // Logging macros
 #define LOG_DEBUG(msg) Logger::instance().log(Logger::Level::DEBUG, std::format("[{}:{}] {}", __FILE__, __LINE__, msg))
-#define LOG_INFO(msg) Logger::instance().log(Logger::Level::INFO, msg)
-#define LOG_WARNING(msg) Logger::instance().log(Logger::Level::WARNING, msg)
-#define LOG_ERROR(msg) Logger::instance().log(Logger::Level::ERROR, msg)
+#define LOG_INFO(msg) Logger::instance().log(Logger::Level::INFO, std::format("[{}:{}] {}", __FILE__, __LINE__, msg))
+#define LOG_WARNING(msg) Logger::instance().log(Logger::Level::WARNING, std::format("[{}:{}] {}", __FILE__, __LINE__, msg))
+#define LOG_ERROR(msg) Logger::instance().log(Logger::Level::ERROR, std::format("[{}:{}] {}", __FILE__, __LINE__, msg))
 
 #endif // LOGGER_HPP

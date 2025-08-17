@@ -36,7 +36,7 @@ void ThreadPool::stop()
         m_stop = true;
     }
     m_condition.notify_all();
-    LOG_INFO("Thread pool stop requested");
+    LOG_DEBUG("Thread pool stop requested");
 }
 
 // Private --------------------
@@ -83,5 +83,5 @@ void ThreadPool::worker_loop(std::stop_token stoken, const size_t thread_id)
         }
     }
 
-    LOG_INFO(std::format("[{}] Thread exiting", thread_name));
+    LOG_DEBUG(std::format("[{}] Thread exiting", thread_name));
 }

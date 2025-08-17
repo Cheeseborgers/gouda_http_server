@@ -10,12 +10,14 @@
 
 #include "http_request_parser.h"
 #include "http_response_builder.h"
+#include "http_structs.hpp"
 #include "http_utils.hpp"
 #include "router.hpp"
 #include "types.hpp"
+#include "websocket.hpp"
 
 ClientHandler::ClientHandler(Socket sock, const ClientHandlerConfig &config)
-    : m_sock{std::move(sock)}, m_config{config}, m_host_details{}, m_connection_id{0}
+    : m_sock{std::move(sock)}, m_config{config}, m_host_details{}, m_connection_id{0}, m_is_websocket{false}
 {
     static std::random_device rd;
     static thread_local std::mt19937_64 gen(rd());
@@ -35,24 +37,24 @@ ClientHandler::ClientHandler(Socket sock, const ClientHandlerConfig &config)
         LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Failed to get client info: {}", m_sock.get(),
                               m_connection_id, std::strerror(errno)));
     }
-    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: ClientHandler created", m_sock.get(), m_connection_id));
+    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: ClientHandler created", m_sock.get(), m_connection_id));
     set_socket_timeouts();
 }
 
-void ClientHandler::handle() const
+void ClientHandler::handle()
 {
-    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Handling client connection", m_sock.get(), m_connection_id));
+    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Handling client connection", m_sock.get(), m_connection_id));
     int handled_requests = 0;
     while (handled_requests < m_config.max_requests) {
         auto result = process_single_request();
         if (!result.has_value()) {
-            LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request processing failed, closing connection",
-                                 m_sock.get(), m_connection_id));
+            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request processing failed, closing connection",
+                                  m_sock.get(), m_connection_id));
             break;
         }
         if (!result.value()) {
-            LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Connection closed per request", m_sock.get(),
-                                 m_connection_id));
+            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Connection closed per request", m_sock.get(),
+                                  m_connection_id));
             break;
         }
         handled_requests++;
@@ -88,22 +90,34 @@ void ClientHandler::set_socket_timeouts() const
     while (buffer.size() < m_config.max_header_size) {
         ssize_t bytes_received = recv(m_sock.get(), temp, sizeof(temp), 0);
         if (bytes_received <= 0) {
+
             if (bytes_received == 0) {
-                LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Connection closed by client",
-                                     m_sock.get(), m_connection_id, request_id));
-            }
-            else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                LOG_WARNING(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv timeout", m_sock.get(),
-                                        m_connection_id, request_id));
-                // TODO: Check that the return content types for these errors are correct
-                send_error_response(HttpStatusCode::REQUEST_TIMEOUT, CONTENT_TYPE_PLAIN, request_id);
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Connection closed by client",
+                                      m_sock.get(), m_connection_id, request_id));
                 return std::nullopt;
+            }
+
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (buffer.empty()) {
+                    // Timeout with no data: expected for keep-alive, close gracefully
+                    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Keep-alive timeout, closing",
+                                          m_sock.get(), m_connection_id, request_id));
+                    return std::nullopt;
+                }
+                else {
+                    // Timeout with partial headers: send 408
+                    LOG_WARNING(
+                        std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv timeout with partial headers",
+                                    m_sock.get(), m_connection_id, request_id));
+                    send_error_response(HttpStatusCode::REQUEST_TIMEOUT, CONTENT_TYPE_PLAIN, request_id);
+                    return std::nullopt;
+                }
             }
             else {
                 LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv error: {}", m_sock.get(),
                                       m_connection_id, request_id, std::strerror(errno)));
+                return std::nullopt;
             }
-            return std::nullopt;
         }
 
         buffer.append(temp, bytes_received);
@@ -234,8 +248,8 @@ std::optional<std::string> ClientHandler::read_requests(const RequestId request_
         }
     }
 
-    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received ({} bytes)", m_sock.get(),
-                         m_connection_id, request_id, buffer.size()));
+    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received ({} bytes)", m_sock.get(),
+                          m_connection_id, request_id, buffer.size()));
     return buffer;
 }
 
@@ -245,19 +259,25 @@ void ClientHandler::send_raw(const HttpResponse &response, const RequestId reque
         [&](const auto &body) {
             if constexpr (std::is_same_v<std::decay_t<decltype(body)>, std::string>) {
                 const std::string raw = HttpResponseBuilder::build(response);
+                // Avoid logging full raw response to prevent body and gaps
+                LOG_DEBUG(std::format(
+                    "Client[FD:{}][Connection:{}]: Request[{}]: Sending string response (status: {}, size: {})",
+                    m_sock.get(), m_connection_id, request_id, static_cast<int>(response.status_code), raw.size()));
+                // Optional: Log body separately for debugging (truncated to avoid large output)
+                // LOG_DEBUG(std::format("Response body (truncated): {}", raw.substr(raw.find("\r\n\r\n") + 4, 50)));
                 size_t sent_total = 0;
                 while (sent_total < raw.size()) {
                     const ssize_t sent = m_sock.send(raw.data() + sent_total, raw.size() - sent_total);
                     if (sent == -1) {
-                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}", m_sock.get(),
-                                              m_connection_id, request_id, std::strerror(errno)));
+                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {} (errno: {})",
+                                              m_sock.get(), m_connection_id, request_id, std::strerror(errno), errno));
                         return;
                     }
                     sent_total += sent;
                 }
-                LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {})",
-                                     m_sock.get(), m_connection_id, request_id, sent_total,
-                                     static_cast<int>(response.status_code)));
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {})",
+                                      m_sock.get(), m_connection_id, request_id, sent_total,
+                                      static_cast<int>(response.status_code)));
             }
             else if constexpr (std::is_same_v<std::decay_t<decltype(body)>, HttpStreamData>) {
                 std::ifstream file(body.file_path, std::ios::binary);
@@ -269,25 +289,35 @@ void ClientHandler::send_raw(const HttpResponse &response, const RequestId reque
                                                 Json{{"error", "Failed to stream file"}}.dump(),
                                                 CONTENT_TYPE_JSON.data());
                     const std::string raw = HttpResponseBuilder::build(error_response);
+                    LOG_DEBUG(std::format(
+                        "Client[FD:{}][Connection:{}]: Request[{}]: Sending error response (status: {}, size: {})",
+                        m_sock.get(), m_connection_id, request_id, static_cast<int>(error_response.status_code),
+                        raw.size()));
                     size_t sent_total = 0;
                     while (sent_total < raw.size()) {
                         const ssize_t sent = m_sock.send(raw.data() + sent_total, raw.size() - sent_total);
                         if (sent == -1) {
-                            LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}",
-                                                  m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
+                            LOG_ERROR(
+                                std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {} (errno: {})",
+                                            m_sock.get(), m_connection_id, request_id, std::strerror(errno), errno));
                             return;
                         }
                         sent_total += sent;
                     }
+                    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {})",
+                                          m_sock.get(), m_connection_id, request_id, sent_total,
+                                          static_cast<int>(error_response.status_code)));
                     return;
                 }
                 const std::string headers = HttpResponseBuilder::build_headers_only(response);
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sending stream headers (size: {})",
+                                      m_sock.get(), m_connection_id, request_id, headers.size()));
                 size_t sent_total = 0;
                 while (sent_total < headers.size()) {
                     const ssize_t sent = m_sock.send(headers.data() + sent_total, headers.size() - sent_total);
                     if (sent == -1) {
-                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}", m_sock.get(),
-                                              m_connection_id, request_id, std::strerror(errno)));
+                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {} (errno: {})",
+                                              m_sock.get(), m_connection_id, request_id, std::strerror(errno), errno));
                         file.close();
                         return;
                     }
@@ -309,8 +339,9 @@ void ClientHandler::send_raw(const HttpResponse &response, const RequestId reque
                         const ssize_t sent =
                             m_sock.send(buffer.data() + chunk_sent_total, bytes_read - chunk_sent_total);
                         if (sent == -1) {
-                            LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {}",
-                                                  m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
+                            LOG_ERROR(
+                                std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {} (errno: {})",
+                                            m_sock.get(), m_connection_id, request_id, std::strerror(errno), errno));
                             file.close();
                             return;
                         }
@@ -324,9 +355,28 @@ void ClientHandler::send_raw(const HttpResponse &response, const RequestId reque
                                     body.file_path.string(), body.offset, body.file_size, bytes_to_send - bytes_sent));
                 }
                 file.close();
-                LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {}, streamed)",
-                                     m_sock.get(), m_connection_id, request_id, bytes_sent,
-                                     static_cast<int>(response.status_code)));
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {}, streamed)",
+                                      m_sock.get(), m_connection_id, request_id, bytes_sent,
+                                      static_cast<int>(response.status_code)));
+            }
+            else if constexpr (std::is_same_v<std::decay_t<decltype(body)>, WebSocketResponseData>) {
+                const std::string raw = HttpResponseBuilder::build(response);
+                LOG_DEBUG(std::format(
+                    "Client[FD:{}][Connection:{}]: Request[{}]: Sending WebSocket response (status: {}, size: {})",
+                    m_sock.get(), m_connection_id, request_id, static_cast<int>(response.status_code), raw.size()));
+                size_t sent_total = 0;
+                while (sent_total < raw.size()) {
+                    const ssize_t sent = m_sock.send(raw.data() + sent_total, raw.size() - sent_total);
+                    if (sent == -1) {
+                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Send error: {} (errno: {})",
+                                              m_sock.get(), m_connection_id, request_id, std::strerror(errno), errno));
+                        return;
+                    }
+                    sent_total += sent;
+                }
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} bytes (status: {})",
+                                      m_sock.get(), m_connection_id, request_id, sent_total,
+                                      static_cast<int>(response.status_code)));
             }
         },
         response.body);
@@ -346,13 +396,13 @@ void ClientHandler::send_error_response(const HttpStatusCode code, const std::st
     send_error_response(code, status_code_to_string_view(code), content_type, request_id);
 }
 
-[[nodiscard]] std::optional<bool> ClientHandler::process_single_request() const
+[[nodiscard]] std::optional<bool> ClientHandler::process_single_request()
 {
     static std::random_device rd;
-    static thread_local std::mt19937_64 gen(rd());
+    static thread_local std::mt19937_64 gen{rd()};
     std::string buffer;
     buffer.reserve(REQUEST_BUFFER_SIZE);
-    bool keep_alive = false;
+    bool keep_alive{false};
 
     RequestId request_id = gen(); // Generate RequestId for the first request
     auto raw_requests = read_requests(request_id);
@@ -362,8 +412,8 @@ void ClientHandler::send_error_response(const HttpStatusCode code, const std::st
 
     size_t processed_bytes = 0;
     while (processed_bytes < raw_requests->size()) {
-        LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Starting new request", m_sock.get(),
-                             m_connection_id, request_id));
+        LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Starting new request", m_sock.get(),
+                              m_connection_id, request_id));
 
         std::string single_request;
         size_t request_end = raw_requests->find("\r\n\r\n", processed_bytes);
@@ -411,8 +461,8 @@ void ClientHandler::send_error_response(const HttpStatusCode code, const std::st
             if (single_request.find(CONTENT_TYPE_JSON_FULL) != std::string::npos) {
                 try {
                     json_body = Json::parse(body);
-                    LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Parsed JSON body", m_sock.get(),
-                                         m_connection_id, request_id));
+                    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Parsed JSON body", m_sock.get(),
+                                          m_connection_id, request_id));
                 }
                 catch (const Json::parse_error &e) {
                     LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: JSON parse error: {}",
@@ -433,6 +483,8 @@ void ClientHandler::send_error_response(const HttpStatusCode code, const std::st
             return std::nullopt;
         }
 
+        m_last_request = *request; // Store the parsed request
+
         if (request->range) {
             LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Parsed Range header: bytes={}-{}",
                                   m_sock.get(), m_connection_id, request_id, request->range->start,
@@ -450,19 +502,39 @@ void ClientHandler::send_error_response(const HttpStatusCode code, const std::st
             return std::nullopt;
         }
 
+        if (request->websocket_data) {
+            if (HttpResponse response = Router::route(*request, json_body, m_connection_id, request_id);
+                std::holds_alternative<WebSocketResponseData>(response.body)) {
+                send_raw(response, request_id);
+                LOG_DEBUG(std::format(
+                    "Client[FD:{}][Connection:{}]: Request[{}]: WebSocket handshake sent, switching to WebSocket mode",
+                    m_sock.get(), m_connection_id, request_id));
+                m_is_websocket = true;                // Switch to WebSocket mode
+                return process_websocket(request_id); // Enter WebSocket frame handling
+            }
+
+            LOG_ERROR(std::format(
+                "Client[FD:{}][Connection:{}]: Request[{}]: WebSocket route did not return WebSocketResponseData",
+                m_sock.get(), m_connection_id, request_id));
+            send_error_response(HttpStatusCode::BAD_REQUEST, "Invalid WebSocket route", CONTENT_TYPE_PLAIN, request_id);
+            return std::nullopt;
+        }
+
         keep_alive = should_keep_alive(*request);
-        HttpResponse response = Router::route(*request, json_body);
+        // TODO: Check where else this gets passed, also figure a better way to handle this with both id's
+        // TODO: This also needs to be handled in routes.hpp
+        HttpResponse response = Router::route(*request, json_body, m_connection_id, request_id);
         response.set_header("Connection", keep_alive ? "keep-alive" : "close");
         send_raw(response, request_id);
 
         if (!keep_alive) {
-            LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Connection closed", m_sock.get(),
-                                 m_connection_id, request_id));
+            LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Connection closed", m_sock.get(),
+                                  m_connection_id, request_id));
             break;
         }
 
-        LOG_INFO(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Processed {} bytes, keep-alive: {}",
-                             m_sock.get(), m_connection_id, request_id, processed_bytes, keep_alive));
+        LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Processed {} bytes, keep-alive: {}",
+                              m_sock.get(), m_connection_id, request_id, processed_bytes, keep_alive));
 
         if (processed_bytes < raw_requests->size()) {
             request_id = gen(); // Generate new RequestId for next pipelined request
@@ -475,4 +547,140 @@ void ClientHandler::send_error_response(const HttpStatusCode code, const std::st
     }
 
     return keep_alive;
+}
+
+bool ClientHandler::process_websocket(RequestId request_id) const
+{
+    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Checking WebSocket handler for path: {}",
+                          m_sock.get(), m_connection_id, request_id, m_last_request.path));
+
+    const auto ws_handler = Router::get_websocket_handler(m_last_request);
+    if (!ws_handler) {
+        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: No WebSocket handler for path {}",
+                              m_sock.get(), m_connection_id, request_id, m_last_request.path));
+        return false;
+    }
+
+    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Entered WebSocket mode", m_sock.get(),
+                          m_connection_id, request_id));
+
+    if (!m_sock.set_recv_timeout(m_config.websocket_timeout)) {
+        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to set WebSocket timeout: {}",
+                              m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
+        return false;
+    }
+
+    std::string buffer;
+    buffer.reserve(REQUEST_BUFFER_SIZE);
+
+    while (m_is_websocket) {
+        char temp[REQUEST_BUFFER_SIZE];
+        ssize_t bytes_received = m_sock.recv(temp, sizeof(temp));
+        LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv returned {} bytes",
+                              m_sock.get(), m_connection_id, request_id, bytes_received));
+        if (bytes_received <= 0) {
+            if (bytes_received == 0) {
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: WebSocket connection closed by client",
+                                      m_sock.get(), m_connection_id, request_id));
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: WebSocket timeout, closing",
+                                      m_sock.get(), m_connection_id, request_id));
+            } else {
+                LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: recv error: {}",
+                                      m_sock.get(), m_connection_id, request_id, std::strerror(errno)));
+            }
+            return false;
+        }
+
+        buffer.append(temp, bytes_received);
+        if (m_config.debug) {
+            const std::string_view chunk(temp, bytes_received);
+            LOG_DEBUG(
+                std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received WebSocket chunk ({} bytes): [{}]",
+                            m_sock.get(), m_connection_id, request_id, bytes_received, to_hex(chunk)));
+        }
+
+        size_t processed_bytes = 0;
+        while (processed_bytes < buffer.size()) {
+            auto frame =
+                HttpRequestParser::parse_websocket_frame(buffer.substr(processed_bytes), m_config.debug, request_id);
+            if (!frame) {
+                break; // Partial frame, wait for more data
+            }
+
+            processed_bytes += 2; // FIN + opcode
+            if (frame->payload_length == 126) {
+                processed_bytes += 2; // Extended payload length (16-bit)
+            }
+            else if (frame->payload_length == 127) {
+                processed_bytes += 8; // Extended payload length (64-bit)
+            }
+            if (frame->mask) {
+                processed_bytes += 4; // Masking key
+            }
+            processed_bytes += frame->payload_length;
+
+            if (frame->opcode == 0x8) { // Close frame
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received close frame", m_sock.get(),
+                                      m_connection_id, request_id));
+                const std::string close_frame = "\x88\x00"; // FIN + close opcode, no reason code
+                if (m_sock.send(close_frame.data(), close_frame.size()) < 0) {
+                    LOG_ERROR(
+                        std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to send WebSocket close frame",
+                                    m_sock.get(), m_connection_id, request_id));
+                }
+                return false;
+            }
+
+            if (frame->opcode == 0x9) { // Ping frame
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received ping frame", m_sock.get(),
+                                      m_connection_id, request_id));
+                std::string pong_frame;
+                pong_frame += '\x8A'; // FIN + pong opcode
+                encode_payload_length(frame->payload_length, pong_frame);
+                pong_frame += frame->payload;
+                if (m_sock.send(pong_frame.data(), pong_frame.size()) < 0) {
+                    LOG_ERROR(
+                        std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to send WebSocket pong frame",
+                                    m_sock.get(), m_connection_id, request_id));
+                    return false;
+                }
+                continue;
+            }
+
+            if (frame->opcode == 0x1 || frame->opcode == 0x2) { // Text or binary frame
+                LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Received {} frame (length: {})",
+                                      m_sock.get(), m_connection_id, request_id,
+                                      frame->opcode == 0x1 ? "text" : "binary", frame->payload_length));
+
+                // Route WebSocket frame to handler
+                try {
+                    std::string response_payload = ws_handler(*frame, m_connection_id, request_id);
+                    std::string response_frame;
+                    response_frame += static_cast<char>(0x80 | frame->opcode); // FIN + same opcode
+                    encode_payload_length(response_payload.size(), response_frame);
+                    response_frame += response_payload;
+
+                    if (m_sock.send(response_frame.data(), response_frame.size()) < 0) {
+                        LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Failed to send WebSocket frame",
+                                              m_sock.get(), m_connection_id, request_id));
+                        return false;
+                    }
+                    LOG_DEBUG(std::format("Client[FD:{}][Connection:{}]: Request[{}]: Sent {} frame (length: {})",
+                                          m_sock.get(), m_connection_id, request_id,
+                                          frame->opcode == 0x1 ? "text" : "binary", response_payload.size()));
+                }
+                catch (const std::exception& e) {
+                    LOG_ERROR(std::format("Client[FD:{}][Connection:{}]: Request[{}]: WebSocket handler error: {}",
+                                          m_sock.get(), m_connection_id, request_id, e.what()));
+                    return false;
+                }
+            }
+
+            buffer.erase(0, processed_bytes);
+            processed_bytes = 0;
+        }
+    }
+
+    return false;
 }

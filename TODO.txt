@@ -1,2 +1,9 @@
+// TODO: Fix file cache lru and how logging is handled with in the cache. figure a better way to pass the req and conn id's
+// For the routes and client handler
 
+
+// TODO: Why are we not logging port
+
+// FIX: Ranges on dls
+// TODO: fix 404 response rendering on browsers. currently renders html text rather than rendered
 

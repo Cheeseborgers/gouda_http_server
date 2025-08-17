@@ -12,6 +12,7 @@ constexpr int POLL_INTERVAL{DEFAULT_POLL_INTERVAL};
 int main() {
     try {
         Logger::instance().set_min_level(Logger::Level::DEBUG);
+        FileCache::initialize(DEFAULT_MAX_FILE_CACHE_SIZE);
         setup_routes();
         Server server(DETAILS, BACKLOG, THREAD_POOL_SIZE, POLL_INTERVAL);
         server.run();

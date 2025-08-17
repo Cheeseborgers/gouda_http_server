@@ -95,6 +95,37 @@ struct HttpStreamData {
     u64 offset{0};                   ///< Offset for range-based streaming
 };
 
+struct WebSocketFrame {
+    bool fin; // Final fragment flag
+    bool rsv1; // Reserved bit 1 (for extensions like per message-deflate)
+    bool rsv2; // Reserved bit 2
+    bool rsv3; // Reserved bit 3
+    uint8_t opcode; // Frame type (e.g., 0x1 for text, 0x2 for binary, 0x8 for close)
+    bool mask; // Masking flag
+    uint64_t payload_length; // Length of payload
+    std::optional<std::array<uint8_t, 4>> masking_key; // Masking key if mask = 1
+    std::string payload; // Payload data
+};
+
+/**
+ * @brief Represents WebSocket-specific data for a request.
+ */
+struct WebSocketRequestData {
+    std::string key;                       // Sec-WebSocket-Key
+    std::string version;                   // Websocket version
+    std::optional<std::string> protocol;   // Sec-WebSocket-Protocol
+    std::optional<std::string> extensions; // Sec-WebSocket-Extensions
+};
+
+/**
+ * @brief Represents WebSocket-specific data for a response.
+ */
+struct WebSocketResponseData {
+    std::string accept_key;                // Sec-WebSocket-Accept
+    std::optional<std::string> protocol;   // Sec-WebSocket-Protocol
+    std::optional<std::string> extensions; // Sec-WebSocket-Extensions
+};
+
 /**
  * @brief Represents a full HTTP request.
  */
@@ -108,6 +139,7 @@ struct HttpRequest {
     std::optional<HttpRequestRange> range;                        ///< Optional byte range
     std::map<std::string, std::vector<std::string>> query_params; ///< Query parameters
     std::map<std::string, std::vector<std::string>> form_params;  ///< Form parameters
+    std::optional<WebSocketRequestData> websocket_data;           ///< WebSocket metadata
 
     /**
      * @brief Sets or replaces an HTTP request header.
@@ -141,10 +173,10 @@ struct HttpRequest {
  * @brief Represents an HTTP response to be sent back to the client.
  */
 struct HttpResponse {
-    HttpStatusCode status_code{HttpStatusCode::OK};                 ///< HTTP status code
-    std::string content_type{std::string(CONTENT_TYPE_PLAIN_UTF8)}; ///< MIME type
-    HeaderMap headers;                                              ///< Response headers
-    std::variant<std::string, HttpStreamData> body;                 ///< Body (text or file stream)
+    HttpStatusCode status_code{HttpStatusCode::OK};                        ///< HTTP status code
+    std::string content_type{std::string(CONTENT_TYPE_PLAIN_UTF8)};        ///< MIME type
+    HeaderMap headers;                                                     ///< Response headers
+    std::variant<std::string, HttpStreamData, WebSocketResponseData> body; ///< Body (text, websocket or file stream)
 
     /**
      * @brief Default constructor. Sets default headers.
@@ -177,6 +209,15 @@ struct HttpResponse {
     {
         set_default_headers();
         set_header("Content-Type", content_type);
+    }
+
+    // TODO: Add docs
+    explicit HttpResponse(const HttpStatusCode status_code, WebSocketResponseData ws_data)
+        : status_code{status_code}, body{std::move(ws_data)}
+    {
+        set_default_headers();
+        set_header("Upgrade", "websocket");
+        set_header("Connection", "Upgrade");
     }
 
     /**

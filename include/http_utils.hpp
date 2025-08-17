@@ -2,11 +2,16 @@
 #ifndef HTTP_UTILS_HPP
 #define HTTP_UTILS_HPP
 
-#include "http_structs.hpp"
-#include "logger.hpp"
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <openssl/sha.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+
+#include "http_structs.hpp"
+#include "logger.hpp"
 
 inline HttpResponse make_response(const HttpStatusCode code, const std::string_view content_type, const std::string_view body)
 {
@@ -146,14 +151,14 @@ inline void parse_query_params(std::string_view query, std::map<std::string, std
     }
 }
 
-inline std::string to_lowercase(std::string_view sv)
+inline std::string to_lowercase(const std::string_view sv)
 {
     std::string result(sv); // Copy the view into a mutable string
     std::ranges::transform(result, result.begin(), [](const unsigned char c) { return std::tolower(c); });
     return result;
 }
 
-inline std::string escape_string(std::string_view input)
+inline std::string escape_string(const std::string_view input)
 {
     std::string result;
     for (const char c : input) {
@@ -169,7 +174,7 @@ inline std::string escape_string(std::string_view input)
     return result;
 }
 
-inline std::string to_hex(std::string_view input)
+inline std::string to_hex(const std::string_view input)
 {
     std::string result;
     for (const char c : input) {
@@ -186,7 +191,7 @@ inline bool contains_ignore_case(std::string_view str, std::string_view substr)
     if (str.empty())
         return false;
 
-    auto to_lower = [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
+    auto to_lower = [](const char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
 
     auto lower_str = str | std::views::transform(to_lower);
     auto lower_substr = substr | std::views::transform(to_lower);

@@ -18,18 +18,11 @@ if(USE_CCACHE)
 endif()
 
 find_package(nlohmann_json REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 add_executable(${PROJECT_NAME}
-        routes.hpp
-        include/file_cache.hpp
-        src/file_cache.cpp
-        include/sockets/base_socket.hpp
-        src/sockets/base_socket.cpp
-        "include/sockets/client_socket.hpp"
-        include/sockets/server_socket.hpp
-        src/sockets/client_socket.cpp
-        src/sockets/server_socket.cpp
-        include/sockets/accepted_socket.hpp)
+        include/websocket.hpp
+)
 
 target_sources(${PROJECT_NAME}
         PRIVATE
@@ -42,6 +35,7 @@ target_sources(${PROJECT_NAME}
         src/http_request_parser.cpp
         src/router.cpp
         src/http_response_builder.cpp
+        src/file_cache.cpp
 )
 
 target_include_directories(${PROJECT_NAME}
@@ -50,4 +44,4 @@ target_include_directories(${PROJECT_NAME}
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)

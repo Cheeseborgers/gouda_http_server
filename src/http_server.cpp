@@ -24,18 +24,18 @@ Server::Server(HostDetails host_details, const int backlog, const size_t thread_
 
     setup_signal_handler();
 
-    LOG_INFO(std::format("Server started on {}:{}", m_host_details.host, m_host_details.port));
+    LOG_DEBUG(std::format("Server started on {}:{}", m_host_details.host, m_host_details.port));
 }
 
 void Server::run()
 {
     m_running = true;
-    LOG_INFO(std::format("Server: waiting for connections..."));
+    LOG_DEBUG(std::format("Server: waiting for connections..."));
     while (m_running) {
         accept_and_handle();
     }
 
-    LOG_INFO("Server shutting down");
+    LOG_DEBUG("Server shutting down");
     m_sock.reset(); // Close server socket
     m_thread_pool.stop();
 }
@@ -43,7 +43,7 @@ void Server::run()
 // Private ----------------
 void Server::setup_signal_handler()
 {
-    LOG_INFO("Registering signal handlers");
+    LOG_DEBUG("Registering signal handlers");
     struct sigaction sa{};
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
@@ -101,7 +101,7 @@ void Server::accept_and_handle()
     char s[INET6_ADDRSTRLEN];
     inet_ntop(their_addr.ss_family, get_in_addr(reinterpret_cast<sockaddr *>(&their_addr)), s, sizeof s);
 
-    LOG_INFO(std::format("server: got connection from {}", s));
+    LOG_DEBUG(std::format("server: got connection from {}", s));
 
     m_thread_pool.enqueue([handler = ClientHandler(std::move(client_sock))]() mutable { handler.handle(); });
 }

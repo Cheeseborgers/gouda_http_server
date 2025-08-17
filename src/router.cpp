@@ -6,6 +6,7 @@
 #include <regex>
 
 #include "file_cache.hpp"
+#include "http_request_parser.h"
 #include "logger.hpp"
 
 std::filesystem::path Router::s_static_files_directory{"static"};
@@ -13,8 +14,26 @@ std::string Router::s_static_url_prefix{"/assets/"};
 std::unordered_map<HttpMethod, std::vector<Router::Route>> Router::s_routes_by_method;
 std::vector<Router::Middleware> Router::s_middlewares;
 
-HttpResponse Router::route(const HttpRequest &request, const std::optional<Json> &json_body)
+HttpResponse Router::route(const HttpRequest &request, const std::optional<Json> &json_body,
+                           const ConnectionId connection_id, const RequestId request_id)
 {
+    LOG_DEBUG(std::format("Request[{}]: {} {}", request_id, method_to_string_view(request.method), request.path));
+
+    // Check for and handle websocket requests first
+    if (request.websocket_data) {
+        // Handle WebSocket upgrade
+        WebSocketResponseData ws_response;
+        ws_response.accept_key = HttpRequestParser::compute_websocket_accept(request.websocket_data->key);
+        // Do not include per message-deflate extension
+        if (request.websocket_data->protocol) {
+            ws_response.protocol = request.websocket_data->protocol;
+        }
+        // Explicitly set extensions to empty to reject per message-deflate
+        ws_response.extensions = std::nullopt;
+        return HttpResponse(HttpStatusCode::SWITCHING_PROTOCOLS, ws_response);
+    }
+
+    // Handle routes
     using enum HttpStatusCode;
     HttpRequestParams params;
     std::smatch matches;
@@ -22,12 +41,14 @@ HttpResponse Router::route(const HttpRequest &request, const std::optional<Json>
     const Route *matched_route = match_route(request, matches);
 
     std::function<HttpResponse()> handler = [&] {
-        if (HttpResponse static_response = handle_static_file(request); is_valid_static_response(static_response)) {
+        if (HttpResponse static_response = handle_static_file(request, connection_id, request_id);
+            is_valid_static_response(static_response)) {
             return static_response;
         }
 
         const bool prefers_html = client_prefers_html(request);
-        const std::string content_type = prefers_html ? "text/html; charset=utf-8" : "application/json";
+        const std::string content_type =
+            prefers_html ? std::string(CONTENT_TYPE_PLAIN_UTF8) : std::string(CONTENT_TYPE_JSON);
 
         if (!matched_route) {
             if (!has_method_routes(request.method)) {
@@ -47,6 +68,7 @@ HttpResponse Router::route(const HttpRequest &request, const std::optional<Json>
         return matched_route->handler(request, params, json_body);
     };
 
+    // Handle middleware
     for (auto &middleware : std::ranges::reverse_view(s_middlewares)) {
         auto next = handler;
         handler = [&request, json_body, middleware, next]() { return middleware(request, json_body, next); };
@@ -74,8 +96,8 @@ void Router::set_static_files_directory(std::string_view fs_path, std::string_vi
     if (s_static_url_prefix.back() != '/') {
         s_static_url_prefix += '/';
     }
-    LOG_INFO(std::format("Static files configured: directory='{}', url_prefix='{}'", s_static_files_directory.string(),
-                         s_static_url_prefix));
+    LOG_DEBUG(std::format("Static files configured: directory='{}', url_prefix='{}'", s_static_files_directory.string(),
+                          s_static_url_prefix));
 }
 
 bool Router::client_prefers_html(const HttpRequest &request)
@@ -84,6 +106,28 @@ bool Router::client_prefers_html(const HttpRequest &request)
     return it != request.headers.end() && contains_ignore_case(it->second, "text/html");
 }
 
+Router::WebSocketHandler Router::get_websocket_handler(const HttpRequest &request)
+{
+    LOG_DEBUG(std::format("Checking WebSocket handler for method: {}, path: {}", method_to_string_view(request.method),
+                          request.path));
+
+    const auto it = s_routes_by_method.find(request.method);
+    if (it == s_routes_by_method.end()) {
+        LOG_DEBUG(std::format("No routes found for method: {}", method_to_string_view(request.method)));
+        return nullptr;
+    }
+
+    std::smatch matches;
+    for (const auto &route : it->second) {
+        if (std::regex_match(request.path, matches, route.pattern) && route.websocket_handler) {
+            LOG_DEBUG(std::format("Found WebSocket handler for path: {}", request.path));
+            return route.websocket_handler;
+        }
+    }
+
+    LOG_DEBUG(std::format("No WebSocket handler found for path: {}", request.path));
+    return nullptr;
+}
 
 // Private -------------------------
 const Router::Route *Router::match_route(const HttpRequest &request, std::smatch &matches)
@@ -110,7 +154,8 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
            std::holds_alternative<HttpStreamData>(resp.body);
 }
 
-[[nodiscard]] HttpResponse Router::handle_static_file(const HttpRequest &request)
+[[nodiscard]] HttpResponse Router::handle_static_file(const HttpRequest &request, ConnectionId connection_id,
+                                                      RequestId request_id)
 {
     using enum HttpStatusCode;
 
@@ -141,19 +186,19 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
     }
 
     auto relative_path = std::filesystem::path(relative_path_str);
-    std::error_code ec;
+    std::error_code error_code;
     auto full_path = s_static_files_directory / relative_path;
 
-    auto canonical_path = std::filesystem::weakly_canonical(full_path, ec);
-    if (ec) {
-        LOG_ERROR(std::format("Failed to resolve path {}: {}", full_path.string(), ec.message()));
+    auto canonical_path = std::filesystem::weakly_canonical(full_path, error_code);
+    if (error_code) {
+        LOG_ERROR(std::format("Failed to resolve path {}: {}", full_path.string(), error_code.message()));
         return HttpResponse(INTERNAL_SERVER_ERROR,
                             prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Failed to resolve file"}}.dump(),
                             error_content_type);
     }
 
-    auto canonical_root = std::filesystem::canonical(s_static_files_directory, ec);
-    if (ec || !canonical_path.string().starts_with(canonical_root.string())) {
+    auto canonical_root = std::filesystem::canonical(s_static_files_directory, error_code);
+    if (error_code || !canonical_path.string().starts_with(canonical_root.string())) {
         LOG_ERROR(
             std::format("Path traversal detected: {} not within {}", canonical_path.string(), canonical_root.string()));
         return HttpResponse(FORBIDDEN, prefers_html ? ERROR_403_HTML.data() : Json{{"error", "Access denied"}}.dump(),
@@ -166,9 +211,9 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
                             error_content_type);
     }
 
-    uint64_t file_size = std::filesystem::file_size(full_path, ec);
-    if (ec) {
-        LOG_ERROR(std::format("Failed to get file size for {}: {}", full_path.string(), ec.message()));
+    uint64_t file_size = std::filesystem::file_size(full_path, error_code);
+    if (error_code) {
+        LOG_ERROR(std::format("Failed to get file size for {}: {}", full_path.string(), error_code.message()));
         return HttpResponse(INTERNAL_SERVER_ERROR,
                             prefers_html ? ERROR_500_HTML.data() : Json{{"error", "Failed to read file"}}.dump(),
                             error_content_type);
@@ -178,20 +223,25 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
     auto it_mime = mime_types.find(ext);
     std::string content_type = it_mime != mime_types.end() ? it_mime->second : "application/octet-stream";
 
-    auto last_modified = std::filesystem::last_write_time(full_path, ec);
-    if (ec) {
-        LOG_ERROR(std::format("Failed to get last modified time for {}: {}", full_path.string(), ec.message()));
+    auto last_modified = std::filesystem::last_write_time(full_path, error_code);
+    if (error_code) {
+        LOG_ERROR(std::format("Failed to get last modified time for {}: {}", full_path.string(), error_code.message()));
         return HttpResponse(INTERNAL_SERVER_ERROR,
                             prefers_html ? ERROR_500_HTML.data()
                                          : Json{{"error", "Failed to read file metadata"}}.dump(),
                             error_content_type);
     }
 
+    // !FIXME: Fix ranges not satisfiable. can we even do this per standard?
+    // test curl -v -H "Range: bytes=209-2097152" http://127.0.0.1:8080/assets/large.bin -o range_output.bin
+    // test curl -v -H "Range: bytes=2097122-2097150" http://127.0.0.1:8080/assets/large.bin -o range_output.bin
+    // (passes) Test file info: Content-Range: bytes 2097122-2097150/2097152
     constexpr uint64_t stream_threshold = DEFAULT_STREAM_THRESHOLD; // 1MB
     HttpResponse response;
 
-    FileCache::FileCacheEntry cache_entry;
-    if (file_size <= stream_threshold && FileCache::get(full_path.string(), cache_entry, last_modified)) {
+    FileCacheEntry cache_entry;
+    if (file_size <= stream_threshold &&
+        FileCache::get(full_path.string(), cache_entry, last_modified, connection_id, request_id)) {
         if (request.range) {
             uint64_t start = request.range->start;
             uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;
@@ -232,7 +282,7 @@ bool Router::is_valid_static_response(const HttpResponse &resp)
             }
             std::string content((std::istreambuf_iterator<char>(file)), {});
             file.close();
-            FileCache::put(full_path.string(), content, last_modified);
+            FileCache::put(full_path.string(), content, last_modified, connection_id, request_id);
             if (request.range) {
                 uint64_t start = request.range->start;
                 uint64_t end = request.range->end == 0 ? file_size - 1 : request.range->end;

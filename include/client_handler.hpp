@@ -9,9 +9,11 @@
 #include "logger.hpp"
 #include "socket_wrapper.h"
 
+// TODO: Change these timing to ints and cast later
 struct ClientHandlerConfig {
     std::chrono::seconds recv_timeout = std::chrono::seconds(DEFAULT_RECV_TIMEOUT);
     std::chrono::seconds send_timeout = std::chrono::seconds(DEFAULT_SEND_TIMEOUT);
+    std::chrono::seconds websocket_timeout{std::chrono::seconds(DEFAULT_WEBSOCKET_TIMEOUT)};
     int max_requests = DEFAULT_MAX_REQUESTS;
     size_t max_header_size = DEFAULT_MAX_HEADER_SIZE;           // 8KB max for headers
     size_t max_content_length = DEFAULT_MAX_CONTENT_LENGTH;     // 1MB max for body
@@ -31,7 +33,7 @@ public:
     ClientHandler(const ClientHandler &) = delete;
     ClientHandler &operator=(const ClientHandler &) = delete;
 
-    void handle() const;
+    void handle();
 
 private:
     void set_socket_timeouts() const;
@@ -45,13 +47,16 @@ private:
     void send_error_response(HttpStatusCode code, std::string_view body, std::string_view content_type,
                              RequestId request_id) const;
     void send_error_response(HttpStatusCode code, std::string_view content_type, RequestId request_id) const;
-    [[nodiscard]] std::optional<bool> process_single_request() const;
+    [[nodiscard]] std::optional<bool> process_single_request();
+    [[nodiscard]] bool process_websocket(RequestId request_id) const;
 
 private:
     Socket m_sock;
     ClientHandlerConfig m_config;
     HostDetails m_host_details;
     ConnectionId m_connection_id;
+    bool m_is_websocket;
+    HttpRequest m_last_request; // Store last parsed request
 };
 
 #endif // CLIENT_HANDLER_HPP

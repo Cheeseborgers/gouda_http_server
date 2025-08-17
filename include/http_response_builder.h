@@ -12,6 +12,7 @@ class HttpResponseBuilder {
 public:
     static std::string build(const HttpResponse& response);
     static std::string build_headers_only(const HttpResponse& response);
+    static std::string build_websocket_frame(const WebSocketFrame& frame, bool debug, RequestId request_id);
 };
 
 #endif //HTTP_RESPONSE_BUILDER_H
